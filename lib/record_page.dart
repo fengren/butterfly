@@ -520,6 +520,7 @@ class RecordTimeRulerPainter extends StatelessWidget {
   final bool isLight;
 
   const RecordTimeRulerPainter({
+    super.key, 
     required this.duration,
     required this.barCount,
     required this.isLight,
