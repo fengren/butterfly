@@ -22,8 +22,6 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
   bool _isPlaying = false;
   Duration _duration = Duration.zero;
   Duration _position = Duration.zero;
-  StreamSubscription? _positionSubscription;
-  StreamSubscription? _durationSubscription;
   List<Duration> _marks = [];
   double waveformDragOffset = 0.0;
   bool isDraggingWaveform = false;
@@ -38,8 +36,6 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
   // 新增：顶部时间更新定时器
   Timer? _topTimeTimer;
   Duration _displayPosition = Duration.zero;
-  DateTime? _playStartTime;
-  Duration _playStartPosition = Duration.zero;
 
   @override
   void initState() {
@@ -54,20 +50,15 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
     // 监听播放状态变化
     _audioPlayer.onPlayerStateChanged.listen((state) {
       if (mounted) {
+        print('播放状态变化: $state');
         setState(() {
           _isPlaying = state == PlayerState.playing;
-          // 如果播放完成，重置播放位置到开始
-          if (state == PlayerState.stopped) {
-            _position = Duration.zero;
-          }
         });
         
-        // 记录播放开始时间和位置
-        if (state == PlayerState.playing) {
-          _playStartTime = DateTime.now();
-          _playStartPosition = _position;
-        } else {
-          _playStartTime = null;
+        // 如果播放完成，立即重新开始播放
+        if (state == PlayerState.completed) {
+          print('检测到completed状态，重新开始播放');
+          _restartPlayback();
         }
       }
     });
@@ -75,6 +66,7 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
     // 监听播放位置变化
     _audioPlayer.onPositionChanged.listen((position) {
       if (mounted) {
+        print('播放位置变化: ${position.inMilliseconds}ms');
         setState(() {
           _position = position;
         });
@@ -92,22 +84,17 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
 
     // 监听播放完成
     _audioPlayer.onPlayerComplete.listen((_) async {
-      if (mounted) {
-        setState(() {
-          _isPlaying = false;
-          _position = Duration.zero; // 重置进度
-          _displayPosition = Duration.zero; // 重置显示
-        });
-        _playStartTime = null;
-        // 确保音频播放器也seek到开始位置
-        await _audioPlayer.seek(Duration.zero);
-      }
+      print('播放完成事件触发');
+      // 播放状态监听器会处理重复播放，这里不需要额外操作
     });
 
     // 加载音频文件
     try {
       await _audioPlayer.setSource(DeviceFileSource(widget.filePath));
       await _loadMarks();
+      // 自动开始播放
+      await _audioPlayer.resume();
+      print('音频加载完成，自动开始播放');
     } catch (e) {
       print('加载音频文件失败: $e');
     }
@@ -130,24 +117,41 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
 
   void _playPause() async {
     if (_isPlaying) {
+      print('暂停播放');
       await _audioPlayer.pause();
     } else {
+      print(
+        '开始播放，当前位置: ${_position.inMilliseconds}ms, 总时长: ${_duration.inMilliseconds}ms',
+      );
+      
       // 如果播放位置在末尾或播放已完成，重新开始播放
       if (_position >= _duration && _duration > Duration.zero) {
+        print('重新开始播放：seek到开始位置');
         await _audioPlayer.seek(Duration.zero);
         setState(() {
           _position = Duration.zero;
           _displayPosition = Duration.zero;
-          _playStartTime = DateTime.now();
-          _playStartPosition = Duration.zero;
-        });
-      } else {
-        setState(() {
-          _playStartTime = DateTime.now();
-          _playStartPosition = _position;
+          waveformDragOffset = 0.0;
         });
       }
-      await _audioPlayer.resume();
+      
+      try {
+        print('调用resume...');
+        await _audioPlayer.resume();
+        print('resume调用完成');
+      } catch (e) {
+        print('resume调用失败: $e');
+        // 如果resume失败，尝试重新加载音频源
+        try {
+          print('重新加载音频源...');
+          await _audioPlayer.setSource(DeviceFileSource(widget.filePath));
+          await _audioPlayer.seek(_position);
+          await _audioPlayer.resume();
+          print('重新加载音频源后播放成功');
+        } catch (e2) {
+          print('重新加载音频源也失败: $e2');
+        }
+      }
     }
   }
 
@@ -214,38 +218,37 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
 
   List<int> _calculateMarkIndices(int barCount) {
     if (_duration.inMilliseconds == 0) return [];
-    return _marks.map((mark) {
+    
+    // 按照时间顺序排序标记点
+    final sortedMarks = List<Duration>.from(_marks)..sort();
+
+    return sortedMarks.map((mark) {
       final progress = mark.inMilliseconds / _duration.inMilliseconds;
       return (progress * barCount).round();
     }).toList();
   }
 
   void _startTopTimeTimer() {
-    _topTimeTimer = Timer.periodic(const Duration(milliseconds: 10), (timer) {
-      if (mounted) {
-        if (_isPlaying && _playStartTime != null) {
-          // 计算从开始播放到现在的时间
-          final elapsed = DateTime.now().difference(_playStartTime!);
-          final newPosition = _playStartPosition + elapsed;
-          setState(() {
-            _displayPosition = newPosition;
-          });
-        } else {
-          // 不在播放时，直接使用当前位置
-          setState(() {
-            _displayPosition = _position;
-          });
-        }
+    _topTimeTimer?.cancel();
+    _topTimeTimer = Timer.periodic(const Duration(milliseconds: 10), (_) {
+      if (_isPlaying && mounted) {
+        setState(() {
+          // 让_displayPosition更细腻地跟随_position
+          _displayPosition =
+              _position + Duration(milliseconds: 10); // 近似推算，提升流畅感
+        });
+      } else if (mounted) {
+        setState(() {
+          _displayPosition = _position;
+        });
       }
     });
   }
 
   @override
   void dispose() {
-    _positionSubscription?.cancel();
-    _durationSubscription?.cancel();
-    _audioPlayer.dispose();
     _topTimeTimer?.cancel();
+    _audioPlayer.dispose();
     super.dispose();
   }
 
@@ -258,7 +261,15 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.black),
         title: Text(
-          '文件名/标题',
+          (() {
+            final nameWithExt = widget.filePath
+                .split(Platform.pathSeparator)
+                .last;
+            final name = nameWithExt.contains('.')
+                ? nameWithExt.substring(0, nameWithExt.lastIndexOf('.'))
+                : nameWithExt;
+            return name;
+          })(),
           style: const TextStyle(
             color: Colors.black,
             fontWeight: FontWeight.bold,
@@ -282,13 +293,20 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
             const SizedBox(height: 16),
             // 大号计时器
             Center(
-              child: Text(
-                _formatDuration(_displayPosition),
-                style: const TextStyle(
-                  fontSize: 48,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black,
-                  letterSpacing: 2,
+              child: SizedBox(
+                width: 200,
+                child: Text(
+                  _formatDuration(_displayPosition),
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.visible,
+                  style: const TextStyle(
+                    fontSize: 36,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black,
+                    letterSpacing: 2,
+                    fontFamily: 'monospace',
+                  ),
                 ),
               ),
             ),
@@ -319,17 +337,13 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
                 },
                 onHorizontalDragUpdate: (details) {
                   setState(() {
-                    waveformDragOffset += details.delta.dx * 0.3; // 调整拖动灵敏度到30%
+                    waveformDragOffset +=
+                        details.delta.dx * 0.15; // 降低拖动灵敏度到15%
                   });
 
                   // 拖动过程中实时更新播放位置，让声纹图显示正确的播放状态
                   final width = MediaQuery.of(context).size.width - 16;
-                  final int totalSeconds = _duration.inSeconds;
-                  final int totalDataPoints = totalSeconds * 20;
-                  final int barCount = (totalDataPoints / 2).round().clamp(
-                    50,
-                    200,
-                  );
+                  final int totalBars = widget.waveform.length; // 使用实际的波形数据长度
                   final percentDelta = -waveformDragOffset / width;
 
                   double currentPercent;
@@ -358,12 +372,7 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
                 onHorizontalDragEnd: (details) async {
                   // 拖动结束时执行seek操作
                   final width = MediaQuery.of(context).size.width - 16;
-                  final int totalSeconds = _duration.inSeconds;
-                  final int totalDataPoints = totalSeconds * 20;
-                  final int barCount = (totalDataPoints / 2).round().clamp(
-                    50,
-                    200,
-                  );
+                  final int totalBars = widget.waveform.length; // 使用实际的波形数据长度
                   final percentDelta = -waveformDragOffset / width;
 
                   double currentPercent;
@@ -441,6 +450,9 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
                                   sortedMarkIndices: markIndices,
                                   dragOffset: waveformDragOffset,
                                   isLight: true,
+                                  duration: _duration,
+                                  position: _position,
+                                  waveform: widget.waveform,
                                 ),
                                 size: Size(width, 240),
                               ),
@@ -477,6 +489,7 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
                             dragOffset: waveformDragOffset,
                             isLight: true,
                             formatFunction: _formatTimeAxis,
+                            waveform: widget.waveform,
                           ).buildWidget();
                         },
                       ),
@@ -516,15 +529,36 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
                     final newPosition = Duration(milliseconds: value.toInt());
                     _audioPlayer.seek(newPosition);
                     _position = newPosition; // 立即更新位置状态
-                    // 如果正在播放，更新播放开始位置
-                    if (_isPlaying) {
-                      _playStartTime = DateTime.now();
-                      _playStartPosition = _position;
-                    }
                   },
                 ),
               ),
             ),
+            // 起止时间显示区域（在进度条下方）
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    '00:00',
+                    style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                  ),
+                  Text(
+                    _formatTimeAxis(_position),
+                    style: const TextStyle(
+                      color: Colors.black,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                  Text(
+                    _formatTimeAxis(_duration),
+                    style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
             // 底部控制区
             Padding(
               padding: const EdgeInsets.only(bottom: 32.0),
@@ -546,20 +580,10 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
                       if (newPosition.inMilliseconds >= 0) {
                         _audioPlayer.seek(newPosition);
                         _position = newPosition; // 立即更新位置状态
-                        // 如果正在播放，更新播放开始位置
-                        if (_isPlaying) {
-                          _playStartTime = DateTime.now();
-                          _playStartPosition = _position;
-                        }
                       } else {
                         // 时间不足时直接从头开始
                         _audioPlayer.seek(Duration.zero);
                         _position = Duration.zero; // 立即更新位置状态
-                        // 如果正在播放，更新播放开始位置
-                        if (_isPlaying) {
-                          _playStartTime = DateTime.now();
-                          _playStartPosition = _position;
-                        }
                       }
                     },
                   ),
@@ -594,20 +618,10 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
                           _duration.inMilliseconds) {
                         _audioPlayer.seek(newPosition);
                         _position = newPosition; // 立即更新位置状态
-                        // 如果正在播放，更新播放开始位置
-                        if (_isPlaying) {
-                          _playStartTime = DateTime.now();
-                          _playStartPosition = _position;
-                        }
                       } else {
                         // 时间不足时直接到最后
                         _audioPlayer.seek(_duration);
                         _position = _duration; // 立即更新位置状态
-                        // 如果正在播放，更新播放开始位置
-                        if (_isPlaying) {
-                          _playStartTime = DateTime.now();
-                          _playStartPosition = _position;
-                        }
                       }
                     },
                   ),
@@ -630,6 +644,23 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
         ),
       ),
     );
+  }
+
+  Future<void> _restartPlayback() async {
+    print('重新开始播放');
+    try {
+      // 在completed状态下需要重新加载音频源
+      await _audioPlayer.setSource(DeviceFileSource(widget.filePath));
+      await _audioPlayer.seek(Duration.zero);
+      setState(() {
+        _position = Duration.zero;
+        _displayPosition = Duration.zero;
+        waveformDragOffset = 0.0;
+      });
+      print('重新开始播放成功');
+    } catch (e) {
+      print('重新开始播放失败: $e');
+    }
   }
 }
 
@@ -684,8 +715,8 @@ class BarWaveformPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final double barWidth = 2; // 增加barWidth以适应较低密度数据
-    final double gap = 1; // 增加gap以适应较低密度数据
+    final double barWidth = 2; // 设置为2
+    final double gap = 2; // 设置为2，与barWidth一致
     final double centerX = size.width / 2;
     final double baseY = size.height / 2;
     final int half = barCount ~/ 2;
@@ -717,13 +748,7 @@ class BarWaveformPainter extends CustomPainter {
       double x = centerX + (i - half) * (barWidth + gap) + dragOffset;
 
       if (dataIdx < 0 || dataIdx >= totalBars) {
-        // 超出范围的部分显示为较窄的浅灰色竖线
-        double barHeight = 15; // 恢复正常的默认高度
-        canvas.drawLine(
-          Offset(x, baseY - barHeight / 2),
-          Offset(x, baseY + barHeight / 2),
-          overflowPaint,
-        );
+        // 超出范围的部分显示为高度为0的竖线（不显示）
         continue;
       }
       
@@ -785,6 +810,7 @@ class TimeRulerPainter extends StatelessWidget {
   final double dragOffset;
   final bool isLight;
   final String Function(Duration) formatFunction;
+  final List<double> waveform;
   const TimeRulerPainter({
     super.key, 
     required this.duration,
@@ -794,6 +820,7 @@ class TimeRulerPainter extends StatelessWidget {
     required this.dragOffset,
     required this.isLight,
     required this.formatFunction,
+    required this.waveform,
   });
 
   Widget buildWidget() => CustomPaint(
@@ -816,22 +843,42 @@ class _TimeRulerPainterImpl extends CustomPainter {
       ..color = parent.isLight ? Colors.grey[400]! : Colors.grey[600]!
       ..strokeWidth = 1;
 
-    // 计算当前播放进度对应的秒数
+    // 检查duration是否有效
+    if (parent.duration.inSeconds <= 0) {
+      return; // 如果duration无效，不绘制时间轴
+    }
+
+    // 使用与波形绘制器完全相同的计算逻辑
     final double playProgress = parent.cursorIndex / parent.barCount;
+    final int totalBars = parent.waveform.length; // 使用实际的波形数据长度
+    final int currentBar = (playProgress * totalBars).round();
+    final int half = parent.barCount ~/ 2;
+
+    // 使用与波形绘制器相同的间距计算方式
+    final double barWidth = 2;
+    final double gap = 2;
+    final double spacing = barWidth + gap; // 4像素间距
+
+    // 计算当前播放位置对应的秒数
     final int currentSecond = (playProgress * parent.duration.inSeconds)
         .round();
 
-    // 绘制时间刻度：以当前播放位置为中心
-    for (int i = -15; i <= 15; i++) {
+    // 绘制时间刻度：只在整秒位置显示时间标签
+    for (int i = -10; i <= 10; i++) {
       int second = currentSecond + i;
       if (second < 0 || second > parent.duration.inSeconds) continue;
 
-      double x = centerX + i * 20.0 + parent.dragOffset;
+      // 计算整秒对应的数据索引位置
+      final double secondProgress = second / parent.duration.inSeconds;
+      final int dataIdx = (secondProgress * totalBars).round();
+      final int relativePos = dataIdx - currentBar;
+
+      double x = centerX + relativePos * spacing + parent.dragOffset;
 
       // 主刻度
       canvas.drawLine(Offset(x, 0), Offset(x, 16), tickPaint);
       
-      // 时间数字（每1秒显示一次）
+      // 时间数字（每1秒显示一次，格式为00:01）
       TextPainter tp = TextPainter(
         text: TextSpan(
           text: parent.formatFunction(Duration(seconds: second)),
@@ -845,48 +892,6 @@ class _TimeRulerPainterImpl extends CustomPainter {
       tp.layout();
       tp.paint(canvas, Offset(x - tp.width / 2, 18));
     }
-    
-    // 起止时间
-    TextPainter startTp = TextPainter(
-      text: TextSpan(
-        text: '00:00',
-        style: TextStyle(
-          color: parent.isLight ? Colors.grey[600] : Colors.grey[300],
-          fontSize: 12,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    );
-    startTp.layout();
-    startTp.paint(canvas, Offset(0, 36));
-
-    TextPainter endTp = TextPainter(
-      text: TextSpan(
-        text: parent.formatFunction(parent.duration),
-        style: TextStyle(
-          color: parent.isLight ? Colors.grey[600] : Colors.grey[300],
-          fontSize: 12,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    );
-    endTp.layout();
-    endTp.paint(canvas, Offset(size.width - endTp.width, 36));
-    
-    // 当前时间在游标下方（移到底部时间轴）
-    TextPainter curTp = TextPainter(
-      text: TextSpan(
-        text: parent.formatFunction(Duration(seconds: currentSecond)),
-        style: TextStyle(
-          color: Colors.black,
-          fontWeight: FontWeight.bold,
-          fontSize: 14,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    );
-    curTp.layout();
-    curTp.paint(canvas, Offset(centerX - curTp.width / 2, 36));
   }
   
   @override
@@ -900,40 +905,78 @@ class MarksPainter extends CustomPainter {
   final List<int> sortedMarkIndices;
   final double dragOffset;
   final bool isLight;
+  final Duration duration;
+  final Duration position;
+  final List<double> waveform;
   MarksPainter({
     required this.markIndices,
     required this.barCount,
     required this.sortedMarkIndices,
     required this.dragOffset,
     required this.isLight,
+    required this.duration,
+    required this.position,
+    required this.waveform,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
     final double barWidth = 2;
-    final double gap = 1;
+    final double gap = 2;
     final double centerX = size.width / 2;
+
+    // 检查duration是否有效
+    if (duration.inSeconds <= 0) {
+      return; // 如果duration无效，不绘制标记点
+    }
+
+    // 使用与波形绘制器完全相同的计算逻辑
+    final double playProgress =
+        position.inMilliseconds / duration.inMilliseconds;
+    final int totalBars = waveform.length; // 使用实际的波形数据长度
+    final int currentBar = (playProgress * totalBars).round();
     final int half = barCount ~/ 2;
 
-    // 计算当前播放进度
-    final double playProgress = sortedMarkIndices.isNotEmpty
-        ? sortedMarkIndices.first / barCount
-        : 0;
-    final int totalBars = 1000; // 假设总波形长度
-    final int currentBar = (playProgress * totalBars).round();
-
     final Paint markPaint = Paint()
-      ..color = Colors.grey[500]!
+      ..color = isLight ? Colors.grey[300]! : Colors.grey[700]!
       ..strokeWidth = 2;
 
+    // 按照时间顺序排序标记点
+    final sortedMarks = List<Duration>.from(
+      markIndices.map((index) {
+        final progress = index / barCount;
+        return Duration(
+          milliseconds: (progress * duration.inMilliseconds).round(),
+        );
+      }),
+    )..sort();
+
+    // 创建时间到序号的映射
+    final Map<Duration, int> timeToOrder = {};
+    for (int i = 0; i < sortedMarks.length; i++) {
+      timeToOrder[sortedMarks[i]] = i + 1;
+    }
+
     for (int i = 0; i < markIndices.length; i++) {
-      int markBar = markIndices[i];
-      // 计算标记点相对于当前播放位置的位置
-      int relativePos = markBar - currentBar;
+      // 计算标记点的实际时间
+      final progress = markIndices[i] / barCount;
+      final markTime = Duration(
+        milliseconds: (progress * duration.inMilliseconds).round(),
+      );
+
+      // 计算标记点在波形数据中的索引
+      final markProgress = markTime.inMilliseconds / duration.inMilliseconds;
+      final markDataIdx = (markProgress * totalBars).round();
+
+      // 计算标记点相对于当前播放位置的位置（与波形绘制器完全一致）
+      final int relativePos = markDataIdx - currentBar;
       double x = centerX + relativePos * (barWidth + gap) + dragOffset;
 
       // 检查标记点是否在可视范围内
       if (x < 0 || x > size.width) continue;
+      
+      // 获取按照时间顺序的序号
+      final orderNumber = timeToOrder[markTime] ?? (i + 1);
       
       // 竖线
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), markPaint);
@@ -941,10 +984,10 @@ class MarksPainter extends CustomPainter {
       // 圆圈
       canvas.drawCircle(Offset(x, 10), 8, markPaint);
       
-      // 数字
+      // 数字（按照时间顺序的序号）
       TextPainter tp = TextPainter(
         text: TextSpan(
-          text: '${i + 1}',
+          text: '$orderNumber',
           style: TextStyle(
             color: Colors.grey[500],
             fontWeight: FontWeight.bold,

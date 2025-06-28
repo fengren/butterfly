@@ -6,6 +6,7 @@ import 'dart:async';
 import 'dart:math';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui';
 
 class RecordPage extends StatefulWidget {
   const RecordPage({super.key});
@@ -14,19 +15,45 @@ class RecordPage extends StatefulWidget {
   State<RecordPage> createState() => _RecordPageState();
 }
 
-class _RecordPageState extends State<RecordPage> {
+class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
   final AudioRecorder _recorder = AudioRecorder();
   bool _isRecording = false;
   bool _isPaused = false;
   Timer? _timer;
   Duration _duration = Duration.zero;
   String? _filePath;
-  final List<double> _realtimeWaveform = [];
-  final List<Duration> _marks = []; // 标记点列表
+  List<double> _waveform = [];
+  List<Duration> _marks = [];
+  double _currentAmplitude = 0.5; // 实时音量
+  static const int sampleRate = 16; // 每秒16个采样点
+  static const int maxBars = 400; // 最多显示的波形条数
+
+  // 添加动画控制器
+  late AnimationController _waveformController;
+  late AnimationController _timerController;
+  double _currentWaveformValue = 0.0;
 
   @override
   void initState() {
     super.initState();
+    _waveformController = AnimationController(
+      duration: const Duration(milliseconds: 150),
+      vsync: this,
+    );
+    _timerController = AnimationController(
+      duration: const Duration(milliseconds: 62),
+      vsync: this,
+    );
+
+    // 监听波形动画，使用更平滑的插值
+    _waveformController.addListener(() {
+      setState(() {
+        // 使用更平滑的插值函数，减少一顿一顿的感觉
+        _currentWaveformValue =
+            0.7 + 0.3 * (1.0 + sin(_waveformController.value * 2 * pi)) / 2;
+      });
+    });
+    
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _startRecording();
     });
@@ -35,6 +62,8 @@ class _RecordPageState extends State<RecordPage> {
   @override
   void dispose() {
     _timer?.cancel();
+    _waveformController.dispose();
+    _timerController.dispose();
     _recorder.dispose();
     super.dispose();
   }
@@ -62,26 +91,35 @@ class _RecordPageState extends State<RecordPage> {
         _isRecording = true;
         _isPaused = false;
         _duration = Duration.zero;
-        _realtimeWaveform.clear();
+        _waveform.clear();
         _marks.clear();
       });
 
-      _timer = Timer.periodic(const Duration(milliseconds: 50), (_) {
+      // 启动定时器，但减少setState调用频率
+      _timer = Timer.periodic(const Duration(milliseconds: 62), (_) {
         if (!_isPaused && _isRecording) {
-          setState(() {
-            _duration += const Duration(milliseconds: 50);
-            // 生成更真实的波形数据
-            final random = Random();
-            final amplitude = 0.1 + 0.4 * random.nextDouble();
-            _realtimeWaveform.add(amplitude);
+          // 更新持续时间
+          _duration += const Duration(milliseconds: 62);
 
-            // 限制波形数据长度，避免内存溢出
-            if (_realtimeWaveform.length > 400) {
-              _realtimeWaveform.removeAt(0);
-            }
-          });
+          // 生成波形数据
+          final random = Random();
+          final amplitude = 0.2 + 0.8 * random.nextDouble();
+          _waveform.add(amplitude);
+
+          // 限制波形数据长度，避免内存溢出
+          if (_waveform.length > maxBars) {
+            _waveform.removeAt(0);
+          }
+          
+          // 每8次数据采集才更新一次UI（约每秒2次更新，更流畅）
+          if (_waveform.length % 8 == 0) {
+            setState(() {});
+          }
         }
       });
+      
+      // 启动波形动画，使用更快的重复频率
+      _waveformController.repeat();
     } catch (e) {
       print('开始录音失败: $e');
     }
@@ -92,26 +130,22 @@ class _RecordPageState extends State<RecordPage> {
     // 在实际项目中可以通过其他方式获取实时音频数据
   }
 
-  Future<void> _pauseRecording() async {
-    try {
-      await _recorder.pause();
-      setState(() {
-        _isPaused = true;
-      });
-    } catch (e) {
-      print('暂停录音失败: $e');
-    }
-  }
-
-  Future<void> _resumeRecording() async {
-    try {
-      await _recorder.resume();
-      setState(() {
-        _isPaused = false;
-      });
-    } catch (e) {
-      print('恢复录音失败: $e');
-    }
+  void _togglePause() {
+    setState(() {
+      _isPaused = !_isPaused;
+      if (_isPaused) {
+        _timer?.cancel();
+      } else {
+        _timer = Timer.periodic(const Duration(milliseconds: 62), (_) {
+          setState(() {
+            _duration += const Duration(milliseconds: 62);
+            double amp = 0.2 + 0.8 * Random().nextDouble();
+            _waveform.add(amp);
+            if (_waveform.length > maxBars) _waveform.removeAt(0);
+          });
+        });
+      }
+    });
   }
 
   void _addMark() {
@@ -121,7 +155,7 @@ class _RecordPageState extends State<RecordPage> {
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('已添加标记点: ${_formatDuration(_duration)}'),
+          content: Text('已添加标记点: ${_formatTimer(_duration)}'),
           duration: const Duration(seconds: 1),
         ),
       );
@@ -136,6 +170,7 @@ class _RecordPageState extends State<RecordPage> {
         _isPaused = false;
       });
       _timer?.cancel();
+      _waveformController.stop();
       
       // 检查录音文件是否生成
       if (_filePath != null) {
@@ -167,7 +202,7 @@ class _RecordPageState extends State<RecordPage> {
 
   Future<void> _saveWaveformData() async {
     try {
-      final normalizedWaveData = _normalizeWaveData(_realtimeWaveform);
+      final normalizedWaveData = _normalizeWaveData(_waveform);
       final waveFile = File('${_filePath!}.wave.json');
       await waveFile.writeAsString(jsonEncode(normalizedWaveData));
       print('波形数据已保存到: ${waveFile.path}');
@@ -209,303 +244,242 @@ class _RecordPageState extends State<RecordPage> {
   }
 
   String _generateRandomId() {
-    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-    final random = Random();
-    return List.generate(
-      10,
-      (index) => chars[random.nextInt(chars.length)],
-    ).join();
+    final now = DateTime.now();
+    final year = now.year;
+    final month = now.month.toString().padLeft(2, '0');
+    final day = now.day.toString().padLeft(2, '0');
+    final hour = now.hour.toString().padLeft(2, '0');
+    final minute = now.minute.toString().padLeft(2, '0');
+    final second = now.second.toString().padLeft(2, '0');
+
+    return '${year}-${month}-${day}_${hour}_${minute}_${second}';
   }
 
-  String _formatDuration(Duration d) {
+  String _formatTimer(Duration d) {
     String two(int n) => n.toString().padLeft(2, '0');
-    return '${d.inMinutes}:${two(d.inSeconds % 60)}';
+    String hundredths = ((d.inMilliseconds % 1000) ~/ 10).toString().padLeft(
+      2,
+      '0',
+    );
+    return '${two(d.inMinutes)}:${two(d.inSeconds % 60)}.$hundredths';
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white, // 极简浅色主题
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        iconTheme: const IconThemeData(color: Colors.black),
-        title: const Text(
-          '录音',
-          style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
-        ),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-      ),
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            const SizedBox(height: 16),
-            // 大号计时器
-            Center(
-              child: Text(
-                _formatDuration(_duration),
-                style: const TextStyle(
-                  fontSize: 48,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black,
-                  letterSpacing: 2,
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            // 录音状态提示
-            Text(
-              _isRecording ? (_isPaused ? '已暂停' : '录音中...') : '准备录音',
-              style: TextStyle(
-                fontSize: 16,
-                color: _isRecording ? Colors.black : Colors.grey[600],
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(height: 32),
-            // 实时波形显示
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8.0),
-              child: SizedBox(
-                height: 200,
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final width = constraints.maxWidth;
-                    final barCount = width ~/ 3;
-                    return Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        // 波形显示
-                        RealtimeWaveformPainter(
-                          _realtimeWaveform,
-                          barCount: barCount * 2,
-                          isLight: true,
-                        ).buildWidget(),
-                        // 标记点显示
-                        CustomPaint(
-                          painter: RecordMarksPainter(
-                            marks: _marks,
-                            duration: _duration,
-                            barCount: barCount * 2,
-                            isLight: true,
-                          ),
-                          size: Size(width, 200),
-                        ),
-                      ],
-                    );
-                  },
-                ),
-              ),
-            ),
-            const SizedBox(height: 24),
-            // 时间轴
-            SizedBox(
-              height: 48,
-              width: double.infinity,
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final width = constraints.maxWidth;
-                  final barCount = width ~/ 3;
-                  return RecordTimeRulerPainter(
-                    duration: _duration,
-                    barCount: barCount * 2,
-                    isLight: true,
-                  ).buildWidget();
-                },
-              ),
-            ),
-            const Spacer(),
-            // 底部控制区
-            Padding(
-              padding: const EdgeInsets.only(bottom: 32.0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  // 小旗子（标记）按钮
-                  IconButton(
-                    onPressed: _addMark,
-                    icon: Icon(Icons.flag, color: Colors.black, size: 28),
-                  ),
-                  const SizedBox(width: 24),
-                  // 暂停/恢复按钮
-                  if (_isRecording)
-                    IconButton(
-                      onPressed: _isPaused ? _resumeRecording : _pauseRecording,
-                      icon: Icon(
-                        _isPaused ? Icons.play_arrow : Icons.pause,
-                        color: Colors.black,
-                        size: 28,
-                      ),
-                    )
-                  else
-                    const SizedBox(width: 28),
-                  const SizedBox(width: 24),
-                  // 录音/停止大圆按钮
-                  GestureDetector(
-                    onTap: _isRecording ? _stopRecording : _startRecording,
-                    child: Container(
-                      width: 72,
-                      height: 72,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: _isRecording ? Colors.red : Colors.black,
-                        boxShadow: [
-                          BoxShadow(color: Colors.black12, blurRadius: 8),
-                        ],
-                      ),
-                      child: Icon(
-                        _isRecording ? Icons.stop : Icons.mic,
-                        size: 36,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+    return WillPopScope(
+      onWillPop: () async {
+        if (_isRecording) {
+          await _stopRecording();
+          return false; // 等待保存后再返回
+        }
+        return true;
+      },
+      child: Scaffold(
+        backgroundColor: Colors.white, // 极简浅色主题
+        appBar: AppBar(
+          backgroundColor: Colors.white,
+          elevation: 0,
+          iconTheme: const IconThemeData(color: Colors.black),
+          title: const Text(
+            '录音',
+            style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+          ),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.more_vert, color: Colors.black),
+              onPressed: () {},
             ),
           ],
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.black),
+            onPressed: () async {
+              if (_isRecording) {
+                await _stopRecording();
+              } else {
+                Navigator.of(context).pop();
+              }
+            },
+          ),
+        ),
+        body: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              const SizedBox(height: 16),
+              // 大号计时器
+              Center(
+                child: SizedBox(
+                  width: 200,
+                  child: Text(
+                    _formatTimer(_duration),
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.visible,
+                    style: TextStyle(
+                      fontSize: 36,
+                      color: Colors.black,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 2,
+                      fontFeatures: [FontFeature.tabularFigures()],
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              // 实时波形显示（与播放器保持一致的高度和布局）
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                child: Column(
+                  children: [
+                    // 波形区（高度提升，与播放器一致）
+                    SizedBox(
+                      height: 220,
+                      child: CustomPaint(
+                        painter: VerticalWaveformPainter(
+                          waveform: _waveform,
+                          barCount: maxBars,
+                          marks: _marks,
+                          duration: _duration,
+                        ),
+                        child: Container(),
+                      ),
+                    ),
+                    const SizedBox(height: 32),
+                    // 时间轴（与播放器一致）
+                    SizedBox(
+                      height: 48,
+                      width: double.infinity,
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final width = constraints.maxWidth;
+                          final barCount = width ~/ 3;
+                          return TimeRulerPainter(
+                            duration: _duration,
+                            barCount: barCount * 2,
+                            waveform: _waveform,
+                          ).buildWidget();
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Spacer(),
+              // 底部控制区（与播放器保持一致的布局）
+              Padding(
+                padding: const EdgeInsets.only(bottom: 32.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    // 标记按钮
+                    IconButton(
+                      onPressed: _isRecording && !_isPaused ? _addMark : null,
+                      icon: Icon(Icons.flag, color: Colors.black, size: 28),
+                    ),
+                    // 录音/停止大圆按钮（始终居中）
+                    GestureDetector(
+                      onTap: _isRecording ? _stopRecording : _startRecording,
+                      child: Container(
+                        width: 72,
+                        height: 72,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: _isRecording ? Colors.red : Colors.black,
+                          boxShadow: [
+                            BoxShadow(color: Colors.black12, blurRadius: 8),
+                          ],
+                        ),
+                        child: Icon(
+                          _isRecording ? Icons.stop : Icons.mic,
+                          size: 36,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                    // 暂停/恢复按钮（仅录音时可用）
+                    IconButton(
+                      onPressed: _isRecording ? _togglePause : null,
+                      icon: Icon(
+                        _isPaused ? Icons.play_arrow : Icons.pause,
+                        color: _isRecording ? Colors.black : Colors.grey[400],
+                        size: 28,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-// 录音实时波形绘制器
-class RealtimeWaveformPainter extends CustomPainter {
+class VerticalWaveformPainter extends CustomPainter {
   final List<double> waveform;
   final int barCount;
-  final bool isLight;
-
-  const RealtimeWaveformPainter(
-    this.waveform, {
+  final List<Duration> marks;
+  final Duration duration;
+  VerticalWaveformPainter({
+    required this.waveform,
     required this.barCount,
-    required this.isLight,
+    required this.marks,
+    required this.duration,
   });
-
-  Widget buildWidget() =>
-      CustomPaint(painter: this, size: Size(double.infinity, 200));
 
   @override
   void paint(Canvas canvas, Size size) {
-    final double barWidth = 2;
-    final double gap = 1;
-    final double centerX = size.width / 2;
-    final double baseY = size.height / 2;
-    final int half = barCount ~/ 2;
-
-    final Paint paint = Paint()
-      ..color = isLight ? Colors.black : Colors.white
+    final centerX = size.width / 2;
+    final centerY = size.height / 2;
+    final barWidth = 2.0, gap = 2.0;
+    final spacing = barWidth + gap;
+    final half = barCount ~/ 2;
+    final totalBars = waveform.length;
+    final barMaxLen = size.height / 2 - 24;
+    final Paint barPaint = Paint()
       ..strokeCap = StrokeCap.round
       ..strokeWidth = barWidth;
 
-    // 绘制实时波形：从中间开始向右延展
+    // 居中对齐，中心为当前录音点
     for (int i = 0; i < barCount; i++) {
-      int dataIdx = waveform.length - barCount + i;
-      if (dataIdx < 0) {
-        // 超出范围的部分显示为浅灰色
-        double x = centerX + (i - half) * (barWidth + gap);
-        double barHeight = 20;
-        canvas.drawLine(
-          Offset(x, baseY - barHeight / 2),
-          Offset(x, baseY + barHeight / 2),
-          paint..color = isLight ? Colors.grey[300]! : Colors.grey[700]!,
-        );
-        continue;
-      }
-
-      double value = dataIdx < waveform.length ? waveform[dataIdx] : 0.5;
-      double x = centerX + (i - half) * (barWidth + gap);
-      double barHeight = value * (size.height * 0.6);
-
+      int dataIdx = totalBars - half + i;
+      double amp = (dataIdx < 0)
+          ? 0
+          : (dataIdx < waveform.length ? waveform[dataIdx] : 0);
+      double barLen = barMaxLen * amp;
+      // 渐变色
+      barPaint.shader =
+          LinearGradient(
+            colors: [Colors.blue, Colors.orange],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ).createShader(
+            Rect.fromLTWH(
+              centerX + (i - half) * spacing,
+              centerY - barLen,
+              barWidth,
+              barLen * 2,
+            ),
+          );
       canvas.drawLine(
-        Offset(x, baseY - barHeight / 2),
-        Offset(x, baseY + barHeight / 2),
-        paint,
+        Offset(centerX + (i - half) * spacing, centerY - barLen),
+        Offset(centerX + (i - half) * spacing, centerY + barLen),
+        barPaint,
       );
     }
-
-    // 居中游标竖线
-    final Paint cursorPaint = Paint()
-      ..color = isLight ? Colors.black : Colors.white
-      ..strokeWidth = 2;
-    canvas.drawLine(
-      Offset(centerX, 0),
-      Offset(centerX, size.height),
-      cursorPaint,
-    );
-
-    // 顶部高亮圆点
-    canvas.drawCircle(Offset(centerX, 10), 6, cursorPaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
-}
-
-// 录音标记点绘制器
-class RecordMarksPainter extends CustomPainter {
-  final List<Duration> marks;
-  final Duration duration;
-  final int barCount;
-  final bool isLight;
-
-  RecordMarksPainter({
-    required this.marks,
-    required this.duration,
-    required this.barCount,
-    required this.isLight,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (marks.isEmpty) return;
-
-    final double barWidth = 2;
-    final double gap = 1;
-    final double centerX = size.width / 2;
-    final int half = barCount ~/ 2;
-
-    final Paint markPaint = Paint()
-      ..color = Colors.grey[500]!
-      ..strokeWidth = 2;
-
-    for (int i = 0; i < marks.length; i++) {
-      final markDuration = marks[i];
-      final markProgress = duration.inMilliseconds > 0
-          ? markDuration.inMilliseconds / duration.inMilliseconds
-          : 0;
-      final markIndex = (markProgress * barCount).round();
-      final relativePos = markIndex - half;
-
-      double x = centerX + relativePos * (barWidth + gap);
-
-      // 检查标记点是否在可视范围内
+    // 标记点
+    for (final mark in marks) {
+      int markIdx = (mark.inMilliseconds / 1000 * _RecordPageState.sampleRate)
+          .round();
+      double x = centerX + (markIdx - totalBars) * spacing;
       if (x < 0 || x > size.width) continue;
-
-      // 竖线
+      final Paint markPaint = Paint()
+        ..color = Colors.grey[300]!
+        ..strokeWidth = 2;
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), markPaint);
-      
-      // 圆圈
       canvas.drawCircle(Offset(x, 10), 8, markPaint);
-      
-      // 数字
-      TextPainter tp = TextPainter(
-        text: TextSpan(
-          text: '${i + 1}',
-          style: TextStyle(
-            color: Colors.grey[500],
-            fontWeight: FontWeight.bold,
-            fontSize: 14,
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      );
-      tp.layout();
-      tp.paint(canvas, Offset(x - tp.width / 2, -tp.height - 2));
     }
   }
 
@@ -513,21 +487,19 @@ class RecordMarksPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }
 
-// 录音时间轴绘制器
-class RecordTimeRulerPainter extends StatelessWidget {
+class TimeRulerPainter extends StatelessWidget {
   final Duration duration;
   final int barCount;
-  final bool isLight;
-
-  const RecordTimeRulerPainter({
+  final List<double> waveform;
+  const TimeRulerPainter({
     super.key, 
     required this.duration,
     required this.barCount,
-    required this.isLight,
+    required this.waveform,
   });
 
   Widget buildWidget() => CustomPaint(
-    painter: _RecordTimeRulerPainterImpl(this),
+    painter: _TimeRulerPainterImpl(this),
     size: Size(double.infinity, 48),
   );
 
@@ -535,81 +507,49 @@ class RecordTimeRulerPainter extends StatelessWidget {
   Widget build(BuildContext context) => buildWidget();
 }
 
-class _RecordTimeRulerPainterImpl extends CustomPainter {
-  final RecordTimeRulerPainter parent;
-  _RecordTimeRulerPainterImpl(this.parent);
+class _TimeRulerPainterImpl extends CustomPainter {
+  final TimeRulerPainter parent;
+  _TimeRulerPainterImpl(this.parent);
 
   @override
   void paint(Canvas canvas, Size size) {
     final double centerX = size.width / 2;
     final Paint tickPaint = Paint()
-      ..color = parent.isLight ? Colors.grey[400]! : Colors.grey[600]!
+      ..color = Colors.grey[400]!
       ..strokeWidth = 1;
 
-    final int currentSecond = parent.duration.inSeconds;
+    final int totalBars = parent.waveform.length;
+    final double barWidth = 2.0, gap = 2.0, spacing = barWidth + gap;
+    final int sampleRate = _RecordPageState.sampleRate;
+    final int totalSeconds = parent.duration.inSeconds;
+    final int half = parent.barCount ~/ 2;
 
-    // 绘制时间刻度：以当前录音位置为中心
+    // 以当前录音点为中心，绘制前后各15秒
     for (int i = -15; i <= 15; i++) {
-      int second = currentSecond + i;
+      int second = totalSeconds + i;
       if (second < 0) continue;
-
-      double x = centerX + i * 20.0;
-
+      int dataIdx = second * sampleRate;
+      double x = centerX + (dataIdx - totalBars) * spacing;
       // 主刻度
       canvas.drawLine(Offset(x, 0), Offset(x, 16), tickPaint);
-      
-      // 时间数字（每5秒显示一次）
-      if (i % 5 == 0) {
-        TextPainter tp = TextPainter(
-          text: TextSpan(
-            text: '$second',
-            style: TextStyle(
-              color: parent.isLight ? Colors.grey[600] : Colors.grey[300],
-              fontSize: 12,
-            ),
-          ),
-          textDirection: TextDirection.ltr,
-        );
-        tp.layout();
-        tp.paint(canvas, Offset(x - tp.width / 2, 18));
-      }
+      // 时间数字（每1秒显示一次，格式00:01）
+      TextPainter tp = TextPainter(
+        text: TextSpan(
+          text: _formatTimeLabel(second),
+          style: TextStyle(
+            color: Colors.grey[400], fontSize: 14),
+        ),
+        textDirection: TextDirection.ltr,
+      );
+      tp.layout();
+      tp.paint(canvas, Offset(x - tp.width / 2, 18));
     }
-    
-    // 起止时间
-    TextPainter startTp = TextPainter(
-      text: TextSpan(
-        text: '0:00',
-        style: TextStyle(
-          color: parent.isLight ? Colors.grey[600] : Colors.grey[300],
-          fontSize: 12,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    );
-    startTp.layout();
-    startTp.paint(canvas, Offset(0, 36));
-    
-    // 当前时间在游标下方
-    TextPainter curTp = TextPainter(
-      text: TextSpan(
-        text: _formatDuration(parent.duration),
-        style: TextStyle(
-          color: Colors.black,
-          fontWeight: FontWeight.bold,
-          fontSize: 14,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    );
-    curTp.layout();
-    curTp.paint(canvas, Offset(centerX - curTp.width / 2, 36));
   }
-  
-  String _formatDuration(Duration d) {
-    String two(int n) => n.toString().padLeft(2, '0');
-    return '${d.inMinutes}:${two(d.inSeconds % 60)}';
+  String _formatTimeLabel(int seconds) {
+    final m = (seconds ~/ 60).toString().padLeft(2, '0');
+    final s = (seconds % 60).toString().padLeft(2, '0');
+    return '$m:$s';
   }
-  
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }

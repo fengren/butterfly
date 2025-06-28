@@ -84,6 +84,8 @@ class _FileListPageState extends State<FileListPage> {
     );
     final extension = currentName.substring(currentName.lastIndexOf('.'));
 
+    final textController = TextEditingController(text: nameWithoutExt);
+    
     final newName = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
@@ -93,7 +95,7 @@ class _FileListPageState extends State<FileListPage> {
           style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
         ),
         content: TextField(
-          controller: TextEditingController(text: nameWithoutExt),
+          controller: textController,
           autofocus: true,
           decoration: const InputDecoration(
             labelText: '文件名',
@@ -108,9 +110,7 @@ class _FileListPageState extends State<FileListPage> {
           ),
           TextButton(
             onPressed: () {
-              final controller = context
-                  .findAncestorWidgetOfExactType<TextField>();
-              Navigator.pop(context, controller?.controller?.text);
+              Navigator.pop(context, textController.text);
             },
             child: const Text(
               '确定',
@@ -243,6 +243,30 @@ class _FileListPageState extends State<FileListPage> {
     return '${minutes.toString().padLeft(2, '0')}:${remainingSeconds.toString().padLeft(2, '0')}';
   }
 
+  Future<String> _getAudioDuration(String filePath) async {
+    try {
+      // 尝试从波形文件获取时长信息
+      final waveFile = File('$filePath.wave.json');
+      if (await waveFile.exists()) {
+        final content = await waveFile.readAsString();
+        final data = jsonDecode(content);
+        final waveform = List<double>.from(
+          data.map((e) => (e as num).toDouble()),
+        );
+
+        // 根据波形数据长度估算时长（每秒16个数据点）
+        final estimatedSeconds = (waveform.length / 16).round();
+        return _formatDuration(estimatedSeconds);
+      }
+
+      // 如果没有波形文件，返回默认时长
+      return '未知时长';
+    } catch (e) {
+      print('获取音频时长失败: $e');
+      return '未知时长';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -305,10 +329,14 @@ class _FileListPageState extends State<FileListPage> {
                       itemBuilder: (context, index) {
                         final file = files[index];
                         final stat = file.statSync();
-                        final fileName = file.path
+                        final fileNameWithExt = file.path
                             .split(Platform.pathSeparator)
                             .last;
-                        final fileSize = _formatFileSize(stat.size);
+                        // 移除扩展名
+                        final fileName = fileNameWithExt.substring(
+                          0,
+                          fileNameWithExt.lastIndexOf('.'),
+                        );
                         final modifiedTime = stat.modified;
 
                         return Padding(
@@ -384,19 +412,26 @@ class _FileListPageState extends State<FileListPage> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     const SizedBox(height: 4),
-                                    Text(
-                                      '大小: $fileSize',
-                                      style: TextStyle(
-                                        color: Colors.grey[600],
-                                        fontSize: 14,
-                                      ),
+                                    FutureBuilder<String>(
+                                      future: _getAudioDuration(file.path),
+                                      builder: (context, snapshot) {
+                                        final duration =
+                                            snapshot.data ?? '未知时长';
+                                        return Text(
+                                          '时长: $duration',
+                                          style: TextStyle(
+                                            color: Colors.grey[600],
+                                            fontSize: 14,
+                                          ),
+                                        );
+                                      },
                                     ),
                                     const SizedBox(height: 2),
                                     Text(
-                                      '修改时间: ${modifiedTime.toString().substring(0, 19)}',
+                                      '创建时间: ${modifiedTime.toString().substring(0, 19)}',
                                       style: TextStyle(
                                         color: Colors.grey[500],
-                                        fontSize: 12,
+                                        fontSize: 14,
                                       ),
                                     ),
                                   ],
