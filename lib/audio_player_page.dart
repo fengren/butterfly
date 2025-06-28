@@ -3,6 +3,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
+import 'dart:math';
 
 class AudioPlayerPage extends StatefulWidget {
   final String filePath;
@@ -36,6 +37,12 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
   // 新增：顶部时间更新定时器
   Timer? _topTimeTimer;
   Duration _displayPosition = Duration.zero;
+
+  // 字幕数据
+  List<Map<String, dynamic>> _subtitles = fakeSubtitle;
+  String _summary = fakeSummary;
+  bool _showFullSubtitle = false;
+  bool _showSubtitle = false;
 
   @override
   void initState() {
@@ -294,211 +301,254 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
             // 大号计时器
             Center(
               child: SizedBox(
-                width: 200,
-                child: Text(
-                  _formatDuration(_displayPosition),
+                width: 180,
+                child: RichText(
                   textAlign: TextAlign.center,
+                  text: TextSpan(
+                    children: [
+                      TextSpan(
+                        text: _formatDuration(
+                          _displayPosition,
+                        ).replaceAll('.', '').substring(0, 5),
+                        style: const TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black,
+                          letterSpacing: 2,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                      WidgetSpan(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 0),
+                          child: Text(
+                            '.',
+                            style: const TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black,
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                        ),
+                      ),
+                      TextSpan(
+                        text: _formatDuration(_displayPosition).substring(6),
+                        style: const TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black,
+                          letterSpacing: 2,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ],
+                  ),
                   maxLines: 1,
                   overflow: TextOverflow.visible,
-                  style: const TextStyle(
-                    fontSize: 36,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black,
-                    letterSpacing: 2,
-                    fontFamily: 'monospace',
-                  ),
                 ),
               ),
             ),
             const SizedBox(height: 16),
-            // AI识音按钮（如有）
-            // Center(
-            //   child: Container(
-            //     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-            //     decoration: BoxDecoration(
-            //       gradient: LinearGradient(colors: [Colors.purpleAccent, Colors.blueAccent]),
-            //       borderRadius: BorderRadius.circular(24),
-            //     ),
-            //     child: const Text('AI识音', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-            //   ),
-            // ),
-            // const SizedBox(height: 8),
-            // 波形区+时间轴整体拖动
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8.0),
-              child: GestureDetector(
-                onHorizontalDragStart: (details) async {
-                  wasPlaying = _isPlaying;
-                  // 拖动开始时强制暂停
-                  await _audioPlayer.pause();
-                  setState(() {
-                    isDraggingWaveform = true;
-                  });
-                },
-                onHorizontalDragUpdate: (details) {
-                  setState(() {
-                    waveformDragOffset +=
-                        details.delta.dx * 0.15; // 降低拖动灵敏度到15%
-                  });
-
-                  // 拖动过程中实时更新播放位置，让声纹图显示正确的播放状态
-                  final width = MediaQuery.of(context).size.width - 16;
-                  final int totalBars = widget.waveform.length; // 使用实际的波形数据长度
-                  final percentDelta = -waveformDragOffset / width;
-
-                  double currentPercent;
-                  if (_position >= _duration) {
-                    currentPercent = 1.0 + percentDelta;
-                  } else {
-                    currentPercent =
-                        (_position.inMilliseconds /
-                            (_duration.inMilliseconds == 0
-                                ? 1
-                                : _duration.inMilliseconds)) +
-                        percentDelta;
-                  }
-                  currentPercent = currentPercent.clamp(0.0, 1.0);
-                  final newMillis = (currentPercent * _duration.inMilliseconds)
-                      .toInt();
-
-                  // 实时更新位置状态，让声纹图显示正确的播放进度
-                  if (newMillis >= 0 && newMillis <= _duration.inMilliseconds) {
+            // 声纹区/文本区共用同一块区域
+            if (_showSubtitle)
+              Expanded(
+                child: SubtitleWithMarksWidget(
+                  subtitles: _subtitles,
+                  position: _displayPosition,
+                  marks: _marks,
+                ),
+              )
+            else
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                child: GestureDetector(
+                  onHorizontalDragStart: (details) async {
+                    wasPlaying = _isPlaying;
+                    await _audioPlayer.pause();
                     setState(() {
-                      _position = Duration(milliseconds: newMillis);
-                      _displayPosition = Duration(milliseconds: newMillis);
+                      isDraggingWaveform = true;
                     });
-                  }
-                },
-                onHorizontalDragEnd: (details) async {
-                  // 拖动结束时执行seek操作
-                  final width = MediaQuery.of(context).size.width - 16;
-                  final int totalBars = widget.waveform.length; // 使用实际的波形数据长度
-                  final percentDelta = -waveformDragOffset / width;
-
-                  double currentPercent;
-                  if (_position >= _duration) {
-                    currentPercent = 1.0 + percentDelta;
-                  } else {
-                    currentPercent =
-                        (_position.inMilliseconds /
-                            (_duration.inMilliseconds == 0
-                                ? 1
-                                : _duration.inMilliseconds)) +
-                        percentDelta;
-                  }
-                  currentPercent = currentPercent.clamp(0.0, 1.0);
-                  final newMillis = (currentPercent * _duration.inMilliseconds)
-                      .toInt();
-
-                  setState(() {
-                    isDraggingWaveform = false;
-                    waveformDragOffset = 0.0;
-                  });
-
-                  // 执行seek操作
-                  if (newMillis >= 0 && newMillis <= _duration.inMilliseconds) {
-                    await _audioPlayer.seek(Duration(milliseconds: newMillis));
-                  }
-
-                  // 拖动结束后根据当前位置恢复播放
-                  if (_position < _duration) {
-                    if (wasPlaying) await _audioPlayer.resume();
-                  } else {
-                    // 拖到结尾，重置到开头并播放
-                    await _audioPlayer.seek(Duration.zero);
+                  },
+                  onHorizontalDragUpdate: (details) {
                     setState(() {
-                      _position = Duration.zero;
-                      _displayPosition = Duration.zero;
+                      waveformDragOffset += details.delta.dx * 0.15;
                     });
-                    if (wasPlaying) await _audioPlayer.resume();
-                  }
-                },
-                child: Column(
-                  children: [
-                    // 波形区（高度提升，时间轴下移）
-                    SizedBox(
-                      height: 240,
-                      child: LayoutBuilder(
-                        builder: (context, constraints) {
-                          final width = constraints.maxWidth;
-                          // 基于每秒20个数据计算barCount
-                          final int totalSeconds = _duration.inSeconds;
-                          final int totalDataPoints =
-                              totalSeconds * 20; // 每秒20个数据
-                          final int barCount = (totalDataPoints / 2)
-                              .round()
-                              .clamp(50, 200); // 限制在合理范围内
-                          final cursorIndex =
-                              _calculateCursorIndex(barCount * 2) ?? 0;
-                          final markIndices = _calculateMarkIndices(
-                            barCount * 2,
-                          );
-                          return Stack(
-                            alignment: Alignment.center,
-                            children: [
-                              BarWaveformPainter(
-                                widget.waveform,
-                                cursorIndex: cursorIndex,
+                    final width = MediaQuery.of(context).size.width - 16;
+                    final int totalBars = widget.waveform.length;
+                    final percentDelta = -waveformDragOffset / width;
+                    double currentPercent;
+                    if (_position >= _duration) {
+                      currentPercent = 1.0 + percentDelta;
+                    } else {
+                      currentPercent =
+                          (_position.inMilliseconds /
+                              (_duration.inMilliseconds == 0
+                                  ? 1
+                                  : _duration.inMilliseconds)) +
+                          percentDelta;
+                    }
+                    currentPercent = currentPercent.clamp(0.0, 1.0);
+                    final newMillis =
+                        (currentPercent * _duration.inMilliseconds).toInt();
+                    if (newMillis >= 0 &&
+                        newMillis <= _duration.inMilliseconds) {
+                      setState(() {
+                        _position = Duration(milliseconds: newMillis);
+                        _displayPosition = Duration(milliseconds: newMillis);
+                      });
+                    }
+                  },
+                  onHorizontalDragEnd: (details) async {
+                    final width = MediaQuery.of(context).size.width - 16;
+                    final int totalBars = widget.waveform.length;
+                    final percentDelta = -waveformDragOffset / width;
+                    double currentPercent;
+                    if (_position >= _duration) {
+                      currentPercent = 1.0 + percentDelta;
+                    } else {
+                      currentPercent =
+                          (_position.inMilliseconds /
+                              (_duration.inMilliseconds == 0
+                                  ? 1
+                                  : _duration.inMilliseconds)) +
+                          percentDelta;
+                    }
+                    currentPercent = currentPercent.clamp(0.0, 1.0);
+                    final newMillis =
+                        (currentPercent * _duration.inMilliseconds).toInt();
+                    setState(() {
+                      isDraggingWaveform = false;
+                      waveformDragOffset = 0.0;
+                    });
+                    if (newMillis >= 0 &&
+                        newMillis <= _duration.inMilliseconds) {
+                      await _audioPlayer.seek(
+                        Duration(milliseconds: newMillis),
+                      );
+                    }
+                    if (_position < _duration) {
+                      if (wasPlaying) await _audioPlayer.resume();
+                    } else {
+                      await _audioPlayer.seek(Duration.zero);
+                      setState(() {
+                        _position = Duration.zero;
+                        _displayPosition = Duration.zero;
+                      });
+                      if (wasPlaying) await _audioPlayer.resume();
+                    }
+                  },
+                  child: SizedBox(
+                    height: 240,
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        final width = constraints.maxWidth;
+                        final int totalSeconds = _duration.inSeconds;
+                        final int totalDataPoints = totalSeconds * 20;
+                        final int barCount = (totalDataPoints / 2)
+                            .round()
+                            .clamp(50, 200);
+                        final cursorIndex =
+                            _calculateCursorIndex(barCount * 2) ?? 0;
+                        final markIndices = _calculateMarkIndices(barCount * 2);
+                        return Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            BarWaveformPainter(
+                              widget.waveform,
+                              cursorIndex: cursorIndex,
+                              barCount: barCount * 2,
+                              dragOffset: waveformDragOffset,
+                              isLight: true,
+                            ).buildWidget(),
+                            CustomPaint(
+                              painter: MarksPainter(
+                                markIndices: markIndices,
                                 barCount: barCount * 2,
+                                sortedMarkIndices: markIndices,
                                 dragOffset: waveformDragOffset,
                                 isLight: true,
-                              ).buildWidget(),
-                              CustomPaint(
-                                painter: MarksPainter(
-                                  markIndices: markIndices,
-                                  barCount: barCount * 2,
-                                  sortedMarkIndices: markIndices,
-                                  dragOffset: waveformDragOffset,
-                                  isLight: true,
-                                  duration: _duration,
-                                  position: _position,
-                                  waveform: widget.waveform,
-                                ),
-                                size: Size(width, 240),
+                                duration: _duration,
+                                position: _position,
+                                waveform: widget.waveform,
                               ),
-                            ],
-                          );
-                        },
-                      ),
+                              size: Size(width, 240),
+                            ),
+                          ],
+                        );
+                      },
                     ),
-                    const SizedBox(height: 32),
-                    // 时间轴区（下移）
-                    SizedBox(
-                      height: 48,
-                      width: double.infinity,
-                      child: LayoutBuilder(
-                        builder: (context, constraints) {
-                          final width = constraints.maxWidth;
-                          // 基于每秒20个数据计算barCount
-                          final int totalSeconds = _duration.inSeconds;
-                          final int totalDataPoints =
-                              totalSeconds * 20; // 每秒20个数据
-                          final int barCount = (totalDataPoints / 2)
-                              .round()
-                              .clamp(50, 200); // 限制在合理范围内
-                          final cursorIndex =
-                              _calculateCursorIndex(barCount * 2) ?? 0;
-                          final markIndices = _calculateMarkIndices(
-                            barCount * 2,
-                          );
-                          return TimeRulerPainter(
-                            duration: _duration,
-                            barCount: barCount * 2,
-                            cursorIndex: cursorIndex,
-                            markIndices: markIndices,
-                            dragOffset: waveformDragOffset,
-                            isLight: true,
-                            formatFunction: _formatTimeAxis,
-                            waveform: widget.waveform,
-                          ).buildWidget();
-                        },
-                      ),
+                  ),
+                ),
+              ),
+
+            // 时间轴 - 只在显示声纹时显示
+            if (!_showSubtitle)
+              SizedBox(
+                height: 48,
+                width: double.infinity,
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final width = constraints.maxWidth;
+                    final int totalSeconds = _duration.inSeconds;
+                    final int totalDataPoints = totalSeconds * 20;
+                    final int barCount = (totalDataPoints / 2).round().clamp(
+                      50,
+                      200,
+                    );
+                    final cursorIndex =
+                        _calculateCursorIndex(barCount * 2) ?? 0;
+                    final markIndices = _calculateMarkIndices(barCount * 2);
+                    return TimeRulerPainter(
+                      duration: _duration,
+                      barCount: barCount * 2,
+                      cursorIndex: cursorIndex,
+                      markIndices: markIndices,
+                      dragOffset: waveformDragOffset,
+                      isLight: true,
+                      formatFunction: _formatTimeAxis,
+                      waveform: widget.waveform,
+                    ).buildWidget();
+                  },
+                ),
+              ),
+            const SizedBox(height: 16),
+            // Spacer 占位
+            const Spacer(),
+            // 切换按钮固定在底部控制区正上方
+            Center(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.grey[900],
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4)],
+                ),
+                child: TextButton(
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 24,
+                      vertical: 4,
                     ),
-                  ],
+                    minimumSize: const Size(0, 32),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _showSubtitle = !_showSubtitle;
+                    });
+                  },
+                  child: Text(
+                    _showSubtitle ? '显示声纹' : '显示文本',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                 ),
               ),
             ),
-            const Spacer(),
+            SizedBox(height: 4),
             // 进度条（极简灰色，下移）
             Padding(
               padding: const EdgeInsets.symmetric(
@@ -537,23 +587,32 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 32.0),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    '00:00',
-                    style: TextStyle(color: Colors.grey[600], fontSize: 12),
-                  ),
-                  Text(
-                    _formatTimeAxis(_position),
-                    style: const TextStyle(
-                      color: Colors.black,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
+                  SizedBox(
+                    width: 48,
+                    child: Text(
+                      '00:00',
+                      style: TextStyle(color: Colors.grey[600], fontSize: 12),
                     ),
                   ),
-                  Text(
-                    _formatTimeAxis(_duration),
-                    style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                  Expanded(
+                    child: Center(
+                      child: Text(
+                        _formatTimeAxis(_position),
+                        style: const TextStyle(
+                          color: Colors.black,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 48,
+                    child: Text(
+                      _formatTimeAxis(_duration),
+                      style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                    ),
                   ),
                 ],
               ),
@@ -561,16 +620,16 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
             const SizedBox(height: 16),
             // 底部控制区
             Padding(
-              padding: const EdgeInsets.only(bottom: 32.0),
+              padding: const EdgeInsets.only(top: 1, bottom: 32.0),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  // 小旗子（标记）按钮
+                  // 左侧按钮组
                   IconButton(
                     onPressed: _addMark,
                     icon: Icon(Icons.flag, color: Colors.black, size: 28),
                   ),
-                  // 快退按钮
+                  SizedBox(width: 24),
                   _QuickSeekButton(
                     forward: false,
                     seconds: 5,
@@ -579,15 +638,16 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
                           _position - const Duration(seconds: 5);
                       if (newPosition.inMilliseconds >= 0) {
                         _audioPlayer.seek(newPosition);
-                        _position = newPosition; // 立即更新位置状态
+                        _position = newPosition;
                       } else {
-                        // 时间不足时直接从头开始
                         _audioPlayer.seek(Duration.zero);
-                        _position = Duration.zero; // 立即更新位置状态
+                        _position = Duration.zero;
                       }
                     },
                   ),
-                  // 播放/暂停大圆按钮（居中）
+                  // 左侧占位
+                  Expanded(child: SizedBox()),
+                  // 播放/暂停按钮（居中）
                   GestureDetector(
                     onTap: _playPause,
                     child: Container(
@@ -607,7 +667,9 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
                       ),
                     ),
                   ),
-                  // 快进按钮
+                  // 右侧占位
+                  Expanded(child: SizedBox()),
+                  // 右侧按钮组
                   _QuickSeekButton(
                     forward: true,
                     seconds: 5,
@@ -617,15 +679,14 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
                       if (newPosition.inMilliseconds <=
                           _duration.inMilliseconds) {
                         _audioPlayer.seek(newPosition);
-                        _position = newPosition; // 立即更新位置状态
+                        _position = newPosition;
                       } else {
-                        // 时间不足时直接到最后
                         _audioPlayer.seek(_duration);
-                        _position = _duration; // 立即更新位置状态
+                        _position = _duration;
                       }
                     },
                   ),
-                  // 速度按钮（可点击切换倍速）
+                  SizedBox(width: 24),
                   TextButton(
                     onPressed: _togglePlaybackRate,
                     child: Text(
@@ -1003,5 +1064,119 @@ class MarksPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+}
+
+// 假字幕数据
+final List<Map<String, dynamic>> fakeSubtitle = [
+  {"start": 0.0, "end": 2.5, "text": "大家好，欢迎体验Flutter录音播放器！"},
+  {"start": 2.5, "end": 5.0, "text": "本应用支持录音、播放、标记和AI字幕。"},
+  {"start": 5.0, "end": 7.5, "text": "现在正在展示自动生成的测试字幕。"},
+  {"start": 7.5, "end": 10.0, "text": "每条字幕会根据时间自动高亮。"},
+  {"start": 10.0, "end": 12.5, "text": "你可以点击标记点查看分割线效果。"},
+  {"start": 12.5, "end": 15.0, "text": "字幕内容支持多行显示和滚动。"},
+  {"start": 15.0, "end": 17.5, "text": "后续可无缝对接阿里云ASR接口。"},
+  {"start": 17.5, "end": 20.0, "text": "支持本地和云端AI处理音频。"},
+  {"start": 20.0, "end": 22.5, "text": "播放器UI极简，交互流畅。"},
+  {"start": 22.5, "end": 25.0, "text": "你可以自由切换声纹和字幕显示。"},
+  {"start": 25.0, "end": 27.5, "text": "底部按钮支持标记、快进快退等操作。"},
+  {"start": 27.5, "end": 30.0, "text": "感谢体验，欢迎提出更多建议！"},
+];
+final String fakeSummary =
+    '本录音内容为测试数据，展示了Flutter播放器的分段高亮字幕、自动滚动和总结弹窗功能。后续可接入阿里云ASR自动生成真实字幕和摘要。';
+
+class SubtitleWithMarksWidget extends StatefulWidget {
+  final List<Map<String, dynamic>> subtitles;
+  final Duration position;
+  final List<Duration> marks;
+  const SubtitleWithMarksWidget({
+    required this.subtitles,
+    required this.position,
+    required this.marks,
+    super.key,
+  });
+  @override
+  State<SubtitleWithMarksWidget> createState() =>
+      _SubtitleWithMarksWidgetState();
+}
+
+class _SubtitleWithMarksWidgetState extends State<SubtitleWithMarksWidget> {
+  final ScrollController _scrollController = ScrollController();
+  int? _currentIndex() {
+    final t = widget.position.inMilliseconds / 1000.0;
+    for (int i = 0; i < widget.subtitles.length; i++) {
+      final s = widget.subtitles[i];
+      if (t >= s['start'] && t < s['end']) return i;
+    }
+    return null;
+  }
+
+  @override
+  void didUpdateWidget(covariant SubtitleWithMarksWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final idx = _currentIndex();
+    if (idx != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scrollController.animateTo(
+          (idx * 48.0).clamp(0, _scrollController.position.maxScrollExtent),
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        );
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // 计算每个字幕段后是否有分割线（与marks时间点对齐）
+    List<Widget> children = [];
+    int markIdx = 0;
+    for (int i = 0; i < widget.subtitles.length; i++) {
+      final s = widget.subtitles[i];
+      final isActive = i == _currentIndex();
+      children.add(
+        Container(
+          height: 72,
+          alignment: Alignment.centerLeft,
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Text(
+              s['text'],
+              style: TextStyle(
+                fontSize: 18,
+                height: 1.2, // 行间距适中
+                color: isActive ? Colors.blue : Colors.black87,
+                fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                backgroundColor: isActive
+                    ? Colors.blue.withOpacity(0.08)
+                    : null,
+              ),
+              overflow: TextOverflow.ellipsis, // 超长自动省略
+            ),
+          ),
+        ),
+      );
+      // 如果有mark落在该字幕段结尾，插入分割线
+      if (markIdx < widget.marks.length) {
+        final markSec = widget.marks[markIdx].inMilliseconds / 1000.0;
+        if (markSec >= s['end'] - 0.01 &&
+            markSec <
+                (i + 1 < widget.subtitles.length
+                    ? widget.subtitles[i + 1]['start']
+                    : double.infinity)) {
+          children.add(
+            const Divider(
+              color: Colors.deepPurple,
+              thickness: 2,
+              indent: 24,
+              endIndent: 24,
+            ),
+          );
+          markIdx++;
+        }
+      }
+    }
+    return ListView(controller: _scrollController, children: children);
+  }
 }
 
