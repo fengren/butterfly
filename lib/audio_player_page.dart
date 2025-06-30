@@ -61,7 +61,7 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
         setState(() {
           _isPlaying = state == PlayerState.playing;
         });
-        
+
         // 如果播放完成，立即重新开始播放
         if (state == PlayerState.completed) {
           print('检测到completed状态，重新开始播放');
@@ -130,7 +130,7 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
       print(
         '开始播放，当前位置: ${_position.inMilliseconds}ms, 总时长: ${_duration.inMilliseconds}ms',
       );
-      
+
       // 如果播放位置在末尾或播放已完成，重新开始播放
       if (_position >= _duration && _duration > Duration.zero) {
         print('重新开始播放：seek到开始位置');
@@ -141,7 +141,7 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
           waveformDragOffset = 0.0;
         });
       }
-      
+
       try {
         print('调用resume...');
         await _audioPlayer.resume();
@@ -166,7 +166,7 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
     setState(() {
       _marks.add(_position);
     });
-    
+
     // 保存标记数据
     _saveMarks();
 
@@ -225,7 +225,7 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
 
   List<int> _calculateMarkIndices(int barCount) {
     if (_duration.inMilliseconds == 0) return [];
-    
+
     // 按照时间顺序排序标记点
     final sortedMarks = List<Duration>.from(_marks)..sort();
 
@@ -299,56 +299,57 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
           children: [
             const SizedBox(height: 16),
             // 大号计时器
-            Center(
-              child: SizedBox(
-                width: 180,
-                child: RichText(
-                  textAlign: TextAlign.center,
-                  text: TextSpan(
-                    children: [
-                      TextSpan(
-                        text: _formatDuration(
-                          _displayPosition,
-                        ).replaceAll('.', '').substring(0, 5),
-                        style: const TextStyle(
-                          fontSize: 28,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black,
-                          letterSpacing: 2,
-                          fontFamily: 'monospace',
+            if (!_showSubtitle)
+              Center(
+                child: SizedBox(
+                  width: 180,
+                  child: RichText(
+                    textAlign: TextAlign.center,
+                    text: TextSpan(
+                      children: [
+                        TextSpan(
+                          text: _formatDuration(
+                            _displayPosition,
+                          ).replaceAll('.', '').substring(0, 5),
+                          style: const TextStyle(
+                            fontSize: 28,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black,
+                            letterSpacing: 2,
+                            fontFamily: 'monospace',
+                          ),
                         ),
-                      ),
-                      WidgetSpan(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 0),
-                          child: Text(
-                            '.',
-                            style: const TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.black,
-                              fontFamily: 'monospace',
+                        WidgetSpan(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 0),
+                            child: Text(
+                              '.',
+                              style: const TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.black,
+                                fontFamily: 'monospace',
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                      TextSpan(
-                        text: _formatDuration(_displayPosition).substring(6),
-                        style: const TextStyle(
-                          fontSize: 28,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black,
-                          letterSpacing: 2,
-                          fontFamily: 'monospace',
+                        TextSpan(
+                          text: _formatDuration(_displayPosition).substring(6),
+                          style: const TextStyle(
+                            fontSize: 28,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black,
+                            letterSpacing: 2,
+                            fontFamily: 'monospace',
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.visible,
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.visible,
                 ),
               ),
-            ),
             const SizedBox(height: 16),
             // 声纹区/文本区共用同一块区域
             if (_showSubtitle)
@@ -357,6 +358,7 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
                   subtitles: _subtitles,
                   position: _displayPosition,
                   marks: _marks,
+                  audioDuration: _duration,
                 ),
               )
             else
@@ -812,21 +814,21 @@ class BarWaveformPainter extends CustomPainter {
         // 超出范围的部分显示为高度为0的竖线（不显示）
         continue;
       }
-      
+
       double value = waveform[dataIdx];
       double barHeight = value * (size.height * 0.6);
 
       // 判断是已播放还是未播放区域
       Paint paint = i < half ? playedPaint : unplayedPaint;
       paint.strokeWidth = barWidth;
-      
+
       canvas.drawLine(
         Offset(x, baseY - barHeight / 2),
         Offset(x, baseY + barHeight / 2),
         paint,
       );
     }
-    
+
     // 居中游标竖线
     final Paint cursorPaint = Paint()
       ..color = isLight ? Colors.black : Colors.white
@@ -836,7 +838,7 @@ class BarWaveformPainter extends CustomPainter {
       Offset(centerX, size.height),
       cursorPaint,
     );
-    
+
     // 顶部高亮圆点
     canvas.drawCircle(Offset(centerX, 10), 6, cursorPaint);
   }
@@ -858,6 +860,7 @@ class CenterCursorPainter extends CustomPainter {
     canvas.drawCircle(Offset(midX, 0), 5, paint);
     canvas.drawCircle(Offset(midX, size.height), 5, paint);
   }
+
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
@@ -873,7 +876,7 @@ class TimeRulerPainter extends StatelessWidget {
   final String Function(Duration) formatFunction;
   final List<double> waveform;
   const TimeRulerPainter({
-    super.key, 
+    super.key,
     required this.duration,
     required this.barCount,
     required this.cursorIndex,
@@ -896,7 +899,7 @@ class TimeRulerPainter extends StatelessWidget {
 class _TimeRulerPainterImpl extends CustomPainter {
   final TimeRulerPainter parent;
   _TimeRulerPainterImpl(this.parent);
-  
+
   @override
   void paint(Canvas canvas, Size size) {
     final double centerX = size.width / 2;
@@ -938,7 +941,7 @@ class _TimeRulerPainterImpl extends CustomPainter {
 
       // 主刻度
       canvas.drawLine(Offset(x, 0), Offset(x, 16), tickPaint);
-      
+
       // 时间数字（每1秒显示一次，格式为00:01）
       TextPainter tp = TextPainter(
         text: TextSpan(
@@ -954,7 +957,7 @@ class _TimeRulerPainterImpl extends CustomPainter {
       tp.paint(canvas, Offset(x - tp.width / 2, 18));
     }
   }
-  
+
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }
@@ -1035,16 +1038,16 @@ class MarksPainter extends CustomPainter {
 
       // 检查标记点是否在可视范围内
       if (x < 0 || x > size.width) continue;
-      
+
       // 获取按照时间顺序的序号
       final orderNumber = timeToOrder[markTime] ?? (i + 1);
-      
+
       // 竖线
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), markPaint);
-      
+
       // 圆圈
       canvas.drawCircle(Offset(x, 10), 8, markPaint);
-      
+
       // 数字（按照时间顺序的序号）
       TextPainter tp = TextPainter(
         text: TextSpan(
@@ -1067,31 +1070,27 @@ class MarksPainter extends CustomPainter {
 }
 
 // 假字幕数据
-final List<Map<String, dynamic>> fakeSubtitle = [
-  {"start": 0.0, "end": 2.5, "text": "大家好，欢迎体验Flutter录音播放器！"},
-  {"start": 2.5, "end": 5.0, "text": "本应用支持录音、播放、标记和AI字幕。"},
-  {"start": 5.0, "end": 7.5, "text": "现在正在展示自动生成的测试字幕。"},
-  {"start": 7.5, "end": 10.0, "text": "每条字幕会根据时间自动高亮。"},
-  {"start": 10.0, "end": 12.5, "text": "你可以点击标记点查看分割线效果。"},
-  {"start": 12.5, "end": 15.0, "text": "字幕内容支持多行显示和滚动。"},
-  {"start": 15.0, "end": 17.5, "text": "后续可无缝对接阿里云ASR接口。"},
-  {"start": 17.5, "end": 20.0, "text": "支持本地和云端AI处理音频。"},
-  {"start": 20.0, "end": 22.5, "text": "播放器UI极简，交互流畅。"},
-  {"start": 22.5, "end": 25.0, "text": "你可以自由切换声纹和字幕显示。"},
-  {"start": 25.0, "end": 27.5, "text": "底部按钮支持标记、快进快退等操作。"},
-  {"start": 27.5, "end": 30.0, "text": "感谢体验，欢迎提出更多建议！"},
-];
+final List<Map<String, dynamic>> fakeSubtitle = List.generate(
+  60,
+  (i) => {
+    "start": (i * 5).toDouble(),
+    "end": ((i + 1) * 5).toDouble(),
+    "text": "第${i + 1}段字幕，时间：${i * 5}~${(i + 1) * 5}秒。这里是测试内容，内容可根据需要自行扩展。",
+  },
+);
 final String fakeSummary =
-    '本录音内容为测试数据，展示了Flutter播放器的分段高亮字幕、自动滚动和总结弹窗功能。后续可接入阿里云ASR自动生成真实字幕和摘要。';
+    '这是一个很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长';
 
 class SubtitleWithMarksWidget extends StatefulWidget {
   final List<Map<String, dynamic>> subtitles;
   final Duration position;
   final List<Duration> marks;
+  final Duration audioDuration;
   const SubtitleWithMarksWidget({
     required this.subtitles,
     required this.position,
     required this.marks,
+    required this.audioDuration,
     super.key,
   });
   @override
@@ -1101,6 +1100,42 @@ class SubtitleWithMarksWidget extends StatefulWidget {
 
 class _SubtitleWithMarksWidgetState extends State<SubtitleWithMarksWidget> {
   final ScrollController _scrollController = ScrollController();
+  final List<GlobalKey> _itemKeys = [];
+  final GlobalKey _listViewKey = GlobalKey();
+
+  @override
+  void initState() {
+    super.initState();
+    _itemKeys.clear();
+    for (int i = 0; i < widget.subtitles.length; i++) {
+      _itemKeys.add(GlobalKey());
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant SubtitleWithMarksWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.subtitles.length != widget.subtitles.length) {
+      _itemKeys.clear();
+      for (int i = 0; i < widget.subtitles.length; i++) {
+        _itemKeys.add(GlobalKey());
+      }
+    }
+  }
+
+  double _getItemOffset(int idx) {
+    final RenderBox? listBox =
+        _listViewKey.currentContext?.findRenderObject() as RenderBox?;
+    final RenderBox? itemBox =
+        _itemKeys[idx].currentContext?.findRenderObject() as RenderBox?;
+    if (listBox != null && itemBox != null) {
+      final listOffset = listBox.localToGlobal(Offset.zero);
+      final itemOffset = itemBox.localToGlobal(Offset.zero);
+      return (itemOffset.dy - listOffset.dy).clamp(0.0, listBox.size.height);
+    }
+    return 0.0;
+  }
+
   int? _currentIndex() {
     final t = widget.position.inMilliseconds / 1000.0;
     for (int i = 0; i < widget.subtitles.length; i++) {
@@ -1111,72 +1146,147 @@ class _SubtitleWithMarksWidgetState extends State<SubtitleWithMarksWidget> {
   }
 
   @override
-  void didUpdateWidget(covariant SubtitleWithMarksWidget oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    final idx = _currentIndex();
-    if (idx != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _scrollController.animateTo(
-          (idx * 48.0).clamp(0, _scrollController.position.maxScrollExtent),
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeInOut,
+  Widget build(BuildContext context) {
+    final currentIdx = _currentIndex() ?? 0;
+    final total = widget.subtitles.length;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return Row(
+        // 调试日志：打印约束信息
+        print("=== SubtitleWithMarksWidget 调试信息 ===");
+        print("约束信息: maxHeight=${constraints.maxHeight}, maxWidth=${constraints.maxWidth}");
+        print("约束信息: minHeight=${constraints.minHeight}, minWidth=${constraints.minWidth}");
+        print("当前索引: $currentIdx, 总字幕数: $total");
+        
+        // 当前高亮字幕块的像素位置
+        final double currentOffset = _getItemOffset(currentIdx);
+        print("当前字幕偏移: $currentOffset");
+        
+        // 标记点像素位置
+        List<double> markOffsets = widget.marks.map((mark) {
+          int markSubtitleIndex = 0;
+          for (int i = 0; i < widget.subtitles.length; i++) {
+            final s = widget.subtitles[i];
+            final markSec = mark.inMilliseconds / 1000.0;
+            if (markSec >= s["start"] && markSec < s["end"]) {
+              markSubtitleIndex = i;
+              break;
+            }
+          }
+          return _getItemOffset(markSubtitleIndex);
+        }).toList();
+        print("标记点偏移: $markOffsets");
+        print("Container高度: ${constraints.maxHeight}");
+          children: [
+            // 字幕滚动区
+            Expanded(
+              child: ListView.builder(
+                key: _listViewKey,
+                controller: _scrollController,
+                itemCount: widget.subtitles.length,
+                padding: EdgeInsets.zero,
+                itemBuilder: (context, i) {
+                  final s = widget.subtitles[i];
+                  final isActive = i == currentIdx;
+                  return Container(
+                    key: _itemKeys[i],
+                    color: isActive
+                        ? Colors.blue.withOpacity(0.08)
+                        : Colors.white,
+                    alignment: Alignment.centerLeft,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 20,
+                    ),
+                    margin: const EdgeInsets.symmetric(vertical: 8),
+                    constraints: const BoxConstraints(minHeight: 72),
+                    child: Text(
+                      s['text'],
+                      style: TextStyle(
+                        fontSize: 18,
+                        height: 1.8,
+                        color: isActive ? Colors.blue[900] : Colors.black87,
+                        fontWeight: isActive
+                            ? FontWeight.w600
+                            : FontWeight.normal,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            // 进度条
+            Container(
+              width: 28,
+              height: listViewHeight,
+              child: Stack(
+                alignment: Alignment.topCenter,
+                children: [
+                  // 竖线
+                  Positioned.fill(
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 12),
+                      width: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey[300],
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  // 当前节点
+                  Positioned(
+                    top: currentOffset + 10, // +padding
+                    left: 5,
+                    child: Container(
+                      width: 18,
+                      height: 18,
+                      decoration: BoxDecoration(
+                        color: Colors.blue,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 3),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.blue.withOpacity(0.2),
+                            blurRadius: 8,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  // 标记点
+                  ...markOffsets.map(
+                    (offset) => Positioned(
+                      top: offset + 10, // +padding
+                      left: 8,
+                      child: Container(
+                        width: 12,
+                        height: 12,
+                        decoration: BoxDecoration(
+                          color: Colors.orange,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.orange.withOpacity(0.2),
+                              blurRadius: 4,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         );
-      });
-    }
+      },
   }
 
-  @override
-  Widget build(BuildContext context) {
-    // 计算每个字幕段后是否有分割线（与marks时间点对齐）
-    List<Widget> children = [];
-    int markIdx = 0;
-    for (int i = 0; i < widget.subtitles.length; i++) {
-      final s = widget.subtitles[i];
-      final isActive = i == _currentIndex();
-      children.add(
-        Container(
-          height: 72,
-          alignment: Alignment.centerLeft,
-          padding: const EdgeInsets.symmetric(horizontal: 32),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Text(
-              s['text'],
-              style: TextStyle(
-                fontSize: 18,
-                height: 1.2, // 行间距适中
-                color: isActive ? Colors.blue : Colors.black87,
-                fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
-                backgroundColor: isActive
-                    ? Colors.blue.withOpacity(0.08)
-                    : null,
-              ),
-              overflow: TextOverflow.ellipsis, // 超长自动省略
-            ),
-          ),
-        ),
-      );
-      // 如果有mark落在该字幕段结尾，插入分割线
-      if (markIdx < widget.marks.length) {
-        final markSec = widget.marks[markIdx].inMilliseconds / 1000.0;
-        if (markSec >= s['end'] - 0.01 &&
-            markSec <
-                (i + 1 < widget.subtitles.length
-                    ? widget.subtitles[i + 1]['start']
-                    : double.infinity)) {
-          children.add(
-            const Divider(
-              color: Colors.deepPurple,
-              thickness: 2,
-              indent: 24,
-              endIndent: 24,
-            ),
-          );
-          markIdx++;
-        }
-      }
-    }
-    return ListView(controller: _scrollController, children: children);
+  String _formatTime(double seconds) {
+    final minutes = (seconds / 60).floor();
+    final remainingSeconds = (seconds % 60).floor();
+    return '${minutes.toString().padLeft(2, '0')}:${remainingSeconds.toString().padLeft(2, '0')}';
   }
 }
-
