@@ -36,6 +36,7 @@ class FileListPage extends StatefulWidget {
 class _FileListPageState extends State<FileListPage> {
   List<FileSystemEntity> files = [];
   bool loading = true;
+  final Map<String, String> _durationCache = {};
 
   @override
   void initState() {
@@ -58,12 +59,15 @@ class _FileListPageState extends State<FileListPage> {
             fileName.endsWith('.wav') ||
             fileName.endsWith('.mp3');
       }).toList();
-      
+
       // 按修改时间排序，最新的在前面
       audioFiles.sort(
         (a, b) => b.statSync().modified.compareTo(a.statSync().modified),
       );
-      
+
+      // 清除缓存
+      _durationCache.clear();
+
       setState(() {
         files = audioFiles;
         loading = false;
@@ -85,7 +89,7 @@ class _FileListPageState extends State<FileListPage> {
     final extension = currentName.substring(currentName.lastIndexOf('.'));
 
     final textController = TextEditingController(text: nameWithoutExt);
-    
+
     final newName = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
@@ -244,6 +248,11 @@ class _FileListPageState extends State<FileListPage> {
   }
 
   Future<String> _getAudioDuration(String filePath) async {
+    // 检查缓存
+    if (_durationCache.containsKey(filePath)) {
+      return _durationCache[filePath]!;
+    }
+
     try {
       // 尝试从波形文件获取时长信息
       final waveFile = File('$filePath.wave.json');
@@ -256,14 +265,21 @@ class _FileListPageState extends State<FileListPage> {
 
         // 根据波形数据长度估算时长（每秒16个数据点）
         final estimatedSeconds = (waveform.length / 16).round();
-        return _formatDuration(estimatedSeconds);
+        final duration = _formatDuration(estimatedSeconds);
+
+        // 缓存结果
+        _durationCache[filePath] = duration;
+        return duration;
       }
 
       // 如果没有波形文件，返回默认时长
-      return '未知时长';
+      const duration = '未知时长';
+      _durationCache[filePath] = duration;
+      return duration;
     } catch (e) {
-      print('获取音频时长失败: $e');
-      return '未知时长';
+      const duration = '未知时长';
+      _durationCache[filePath] = duration;
+      return duration;
     }
   }
 
@@ -456,9 +472,7 @@ class _FileListPageState extends State<FileListPage> {
                                       waveform = List<double>.from(
                                         data.map((e) => (e as num).toDouble()),
                                       );
-                                      print('成功加载波形数据，长度: ${waveform.length}');
                                     } else {
-                                      print('波形文件不存在: ${waveFile.path}');
                                       // 生成默认波形数据
                                       waveform = List.generate(
                                         200, // 调整默认数据量，假设10秒音频，每秒20个数据
@@ -466,7 +480,6 @@ class _FileListPageState extends State<FileListPage> {
                                             (0.2 + 0.4 * (index % 10) / 10.0)
                                                 .toDouble(),
                                       );
-                                      print('已生成默认波形数据');
                                     }
                                   } catch (e) {
                                     print('加载波形数据时出错: $e');
@@ -477,7 +490,6 @@ class _FileListPageState extends State<FileListPage> {
                                           (0.2 + 0.4 * (index % 10) / 10.0)
                                               .toDouble(),
                                     );
-                                    print('已生成默认波形数据作为备用');
                                   }
 
                                   if (mounted) {
