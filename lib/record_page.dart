@@ -26,7 +26,7 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
   List<Duration> _marks = [];
   double _currentAmplitude = 0.5; // 实时音量
   static const int sampleRate = 16; // 每秒16个采样点
-  static const int maxBars = 400; // 最多显示的波形条数
+  static const int maxBars = 800; // 最多显示的波形条数
 
   // 添加动画控制器
   late AnimationController _waveformController;
@@ -53,7 +53,7 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
             0.7 + 0.3 * (1.0 + sin(_waveformController.value * 2 * pi)) / 2;
       });
     });
-    
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _startRecording();
     });
@@ -69,9 +69,28 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
   }
 
   Future<void> _startRecording() async {
-    final status = await Permission.microphone.request();
-    if (status != PermissionStatus.granted) return;
-    
+    // 请求麦克风权限
+    final micStatus = await Permission.microphone.request();
+    if (micStatus != PermissionStatus.granted) {
+      print('麦克风权限被拒绝');
+      return;
+    }
+
+    // 请求存储权限（Android）
+    if (Platform.isAndroid) {
+      // 请求麦克风权限
+      if (await Permission.microphone.request() != PermissionStatus.granted) {
+        print('麦克风权限被拒绝');
+        return;
+      }
+
+      // 对于较老版本，请求存储权限
+      if (await Permission.storage.request() != PermissionStatus.granted) {
+        print('存储权限被拒绝，尝试继续录音');
+        // 不直接返回，因为应用文档目录可能不需要特殊权限
+      }
+    }
+
     final dir = await getApplicationDocumentsDirectory();
     final fileName = '${_generateRandomId()}.aac';
     _filePath = '${dir.path}/$fileName';
@@ -83,6 +102,9 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
           sampleRate: 44100,
           numChannels: 1,
           bitRate: 128000,
+          autoGain: false,
+          echoCancel: false,
+          noiseSuppress: false,
         ),
         path: _filePath!,
       );
@@ -110,14 +132,14 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
           if (_waveform.length > maxBars) {
             _waveform.removeAt(0);
           }
-          
+
           // 每8次数据采集才更新一次UI（约每秒2次更新，更流畅）
           if (_waveform.length % 8 == 0) {
             setState(() {});
           }
         }
       });
-      
+
       // 启动波形动画，使用更快的重复频率
       _waveformController.repeat();
     } catch (e) {
@@ -164,17 +186,26 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
 
   Future<void> _stopRecording() async {
     try {
-      await _recorder.stop();
+      // 先停止定时器和动画
+      _timer?.cancel();
+      _waveformController.stop();
+
+      // 停止录音
+      final path = await _recorder.stop();
+
       setState(() {
         _isRecording = false;
         _isPaused = false;
       });
-      _timer?.cancel();
-      _waveformController.stop();
-      
+
       // 检查录音文件是否生成
-      if (_filePath != null) {
-        final audioFile = File(_filePath!);
+      if (path != null && path.isNotEmpty) {
+        _filePath = path;
+        final audioFile = File(path);
+
+        // 等待文件写入完成
+        await Future.delayed(const Duration(milliseconds: 500));
+
         if (await audioFile.exists()) {
           final fileSize = await audioFile.length();
           print('录音文件已生成: ${audioFile.path}, 大小: $fileSize 字节');
@@ -189,6 +220,8 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
         } else {
           print('错误：录音文件未生成');
         }
+      } else {
+        print('错误：录音停止但未返回文件路径');
       }
 
       print('录音已保存: $_filePath');
@@ -492,7 +525,7 @@ class TimeRulerPainter extends StatelessWidget {
   final int barCount;
   final List<double> waveform;
   const TimeRulerPainter({
-    super.key, 
+    super.key,
     required this.duration,
     required this.barCount,
     required this.waveform,
@@ -536,8 +569,7 @@ class _TimeRulerPainterImpl extends CustomPainter {
       TextPainter tp = TextPainter(
         text: TextSpan(
           text: _formatTimeLabel(second),
-          style: TextStyle(
-            color: Colors.grey[400], fontSize: 14),
+          style: TextStyle(color: Colors.grey[400], fontSize: 14),
         ),
         textDirection: TextDirection.ltr,
       );
@@ -545,12 +577,13 @@ class _TimeRulerPainterImpl extends CustomPainter {
       tp.paint(canvas, Offset(x - tp.width / 2, 18));
     }
   }
+
   String _formatTimeLabel(int seconds) {
     final m = (seconds ~/ 60).toString().padLeft(2, '0');
     final s = (seconds % 60).toString().padLeft(2, '0');
     return '$m:$s';
   }
+
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }
-

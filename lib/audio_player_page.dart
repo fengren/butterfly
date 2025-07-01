@@ -539,27 +539,29 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
                     _showSubtitle ? '显示声纹' : '显示文本',
                     style: const TextStyle(
                       color: Colors.white,
-                      fontSize: 14,
+                      fontSize: 12,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
                 ),
               ),
             ),
-            SizedBox(height: 4),
+            SizedBox(height: 2),
             // 进度条（极简灰色，下移）
             Padding(
               padding: const EdgeInsets.symmetric(
-                horizontal: 32.0,
-                vertical: 16.0,
+                horizontal: 16.0,
+                vertical: 8.0,
               ),
               child: SliderTheme(
                 data: SliderTheme.of(context).copyWith(
-                  trackHeight: 2,
+                  trackHeight: 4,
                   thumbShape: const RoundSliderThumbShape(
-                    enabledThumbRadius: 7,
+                    enabledThumbRadius: 10,
                   ),
-                  overlayShape: SliderComponentShape.noOverlay,
+                  overlayShape: const RoundSliderOverlayShape(
+                    overlayRadius: 20,
+                  ),
                   activeTrackColor: Colors.grey[400],
                   inactiveTrackColor: Colors.grey[200],
                   thumbColor: Colors.black,
@@ -1069,11 +1071,12 @@ class MarksPainter extends CustomPainter {
 
 // 假字幕数据
 final List<Map<String, dynamic>> fakeSubtitle = List.generate(
-  60,
+  120,
   (i) => {
-    "start": (i * 5).toDouble(),
-    "end": ((i + 1) * 5).toDouble(),
-    "text": "第${i + 1}段字幕，时间：${i * 5}~${(i + 1) * 5}秒。这里是测试内容，内容可根据需要自行扩展。",
+    "start": (i * 2.5).toDouble(),
+    "end": ((i + 1) * 2.5).toDouble(),
+    "text":
+        "第${i + 1}段字幕，时间：${(i * 2.5).toStringAsFixed(1)}~${((i + 1) * 2.5).toStringAsFixed(1)}秒。这里是测试内容，内容可根据需要自行扩展。",
   },
 );
 
@@ -1263,20 +1266,66 @@ class _SubtitleWithMarksWidgetState extends State<SubtitleWithMarksWidget> {
                           (mark.inMilliseconds /
                               widget.audioDuration.inMilliseconds) *
                           constraints.maxHeight,
-                      left: 8,
-                      child: Container(
-                        width: 12,
-                        height: 12,
-                        decoration: BoxDecoration(
-                          color: Colors.orange,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 2),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.orange.withOpacity(0.2),
-                              blurRadius: 4,
+                      left: 4,
+                      child: GestureDetector(
+                        onTap: () {
+                          // 跳转到对应标记点的时间
+                          final audioPlayerPage = context
+                              .findAncestorStateOfType<_AudioPlayerPageState>();
+                          if (audioPlayerPage != null) {
+                            audioPlayerPage._audioPlayer.seek(mark);
+                            audioPlayerPage.setState(() {
+                              audioPlayerPage._position = mark;
+                              audioPlayerPage._displayPosition = mark;
+                            });
+                          }
+                        },
+                        onLongPress: () {
+                          // 长按删除标记点
+                          final audioPlayerPage = context
+                              .findAncestorStateOfType<_AudioPlayerPageState>();
+                          if (audioPlayerPage != null) {
+                            // 先保存要删除的标记时间，用于显示提示
+                            final markTime = audioPlayerPage._formatDuration(
+                              mark,
+                            );
+
+                            audioPlayerPage.setState(() {
+                              audioPlayerPage._marks.remove(mark);
+                            });
+
+                            // 保存更新后的标记数据
+                            audioPlayerPage._saveMarks();
+
+                            // 显示删除提示
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('已删除标记点: $markTime'),
+                                duration: const Duration(seconds: 1),
+                              ),
+                            );
+                          }
+                        },
+                        behavior: HitTestBehavior.opaque,
+                        child: Container(
+                          width: 20,
+                          height: 20,
+                          alignment: Alignment.center,
+                          child: Container(
+                            width: 12,
+                            height: 12,
+                            decoration: BoxDecoration(
+                              color: Colors.orange,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 2),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.orange.withOpacity(0.2),
+                                  blurRadius: 4,
+                                ),
+                              ],
                             ),
-                          ],
+                          ),
                         ),
                       ),
                     ),
