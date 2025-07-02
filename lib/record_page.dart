@@ -7,6 +7,9 @@ import 'dart:math';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui';
+import 'rust_waveform.dart';
+import 'dart:ffi' as ffi;
+import 'package:ffi/ffi.dart'; // for calloc
 
 class RecordPage extends StatefulWidget {
   const RecordPage({super.key});
@@ -152,19 +155,25 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
     // 在实际项目中可以通过其他方式获取实时音频数据
   }
 
-  void _togglePause() {
+  void _togglePause() async {
     setState(() {
       _isPaused = !_isPaused;
       if (_isPaused) {
         _timer?.cancel();
+        // 暂停录音
+        _recorder.pause();
       } else {
+        // 恢复录音
+        _recorder.resume();
         _timer = Timer.periodic(const Duration(milliseconds: 62), (_) {
-          setState(() {
-            _duration += const Duration(milliseconds: 62);
-            double amp = 0.2 + 0.8 * Random().nextDouble();
-            _waveform.add(amp);
-            if (_waveform.length > maxBars) _waveform.removeAt(0);
-          });
+          if (!_isPaused && _isRecording) {
+            setState(() {
+              _duration += const Duration(milliseconds: 62);
+              double amp = 0.2 + 0.8 * Random().nextDouble();
+              _waveform.add(amp);
+              if (_waveform.length > maxBars) _waveform.removeAt(0);
+            });
+          }
         });
       }
     });
@@ -586,4 +595,39 @@ class _TimeRulerPainterImpl extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+}
+
+/// Save waveform data to file as JSON
+dynamic saveWaveformToFile(List<double> waveformData, String filePath) async {
+  final file = File(filePath);
+  final jsonStr = jsonEncode(waveformData);
+  await file.writeAsString(jsonStr);
+}
+
+/// Load waveform data from file as List<double>
+dynamic loadWaveformFromFile(String filePath) async {
+  final file = File(filePath);
+  if (!await file.exists()) {
+    throw Exception('Waveform file not found');
+  }
+  final jsonStr = await file.readAsString();
+  final List<dynamic> jsonList = jsonDecode(jsonStr);
+  return jsonList.cast<double>();
+}
+
+// 在录音结束的地方补充保存波形数据逻辑
+void onRecordFinish(String audioPath, List<double> waveformData) async {
+  // Save waveform data file with same name as audio file
+  final waveformPath = audioPath.replaceAll(
+    RegExp(r'\.(wav|aac|m4a|mp3)\$'),
+    '.waveform.json',
+  );
+  await saveWaveformToFile(waveformData, waveformPath);
+  // ... 其他录音结束逻辑 ...
+}
+
+// 录音页面暂未实现 extractPcmSamples，直接引用播放器页面的未实现方法
+Future<List<double>> extractPcmSamples(String audioPath) async {
+  // TODO: Implement actual PCM extraction logic (AAC to PCM float array)
+  throw UnimplementedError('extractPcmSamples must be implemented');
 }

@@ -4,6 +4,10 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 import 'dart:math';
+import 'rust_waveform.dart';
+import 'dart:ffi' as ffi; // for ffi.Float, ffi.Pointer
+import 'package:ffi/ffi.dart'; // for calloc
+import 'package:path/path.dart' as p;
 
 class AudioPlayerPage extends StatefulWidget {
   final String filePath;
@@ -39,7 +43,7 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
   Duration _displayPosition = Duration.zero;
 
   // 字幕数据
-  List<Map<String, dynamic>> _subtitles = fakeSubtitle;
+  List<Map<String, dynamic>> _subtitles = [];
   bool _showFullSubtitle = false;
   bool _showSubtitle = false;
 
@@ -48,6 +52,7 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
     super.initState();
     _initAudioPlayer();
     _startTopTimeTimer();
+    _loadSubtitles();
   }
 
   void _initAudioPlayer() async {
@@ -221,14 +226,8 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
 
   void _startTopTimeTimer() {
     _topTimeTimer?.cancel();
-    _topTimeTimer = Timer.periodic(const Duration(milliseconds: 10), (_) {
-      if (_isPlaying && mounted) {
-        setState(() {
-          // 让_displayPosition更细腻地跟随_position
-          _displayPosition =
-              _position + Duration(milliseconds: 10); // 近似推算，提升流畅感
-        });
-      } else if (mounted) {
+    _topTimeTimer = Timer.periodic(const Duration(milliseconds: 10), (timer) {
+      if (_isPlaying) {
         setState(() {
           _displayPosition = _position;
         });
@@ -245,6 +244,9 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_subtitles.isEmpty) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
     return Scaffold(
       backgroundColor: Colors.white, // 极简浅色主题
       appBar: AppBar(
@@ -288,54 +290,18 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
                     Center(
                       child: SizedBox(
                         width: 180,
-                        child: RichText(
+                        child: Text(
+                          _formatDuration(_displayPosition),
                           textAlign: TextAlign.center,
-                          text: TextSpan(
-                            children: [
-                              TextSpan(
-                                text: _formatDuration(
-                                  _displayPosition,
-                                ).replaceAll('.', '').substring(0, 5),
-                                style: const TextStyle(
-                                  fontSize: 28,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.black,
-                                  letterSpacing: 2,
-                                  fontFamily: 'monospace',
-                                ),
-                              ),
-                              WidgetSpan(
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 0,
-                                  ),
-                                  child: Text(
-                                    '.',
-                                    style: const TextStyle(
-                                      fontSize: 22,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black,
-                                      fontFamily: 'monospace',
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              TextSpan(
-                                text: _formatDuration(
-                                  _displayPosition,
-                                ).substring(6),
-                                style: const TextStyle(
-                                  fontSize: 28,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.black,
-                                  letterSpacing: 2,
-                                  fontFamily: 'monospace',
-                                ),
-                              ),
-                            ],
-                          ),
                           maxLines: 1,
                           overflow: TextOverflow.visible,
+                          style: const TextStyle(
+                            fontSize: 32,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black,
+                            letterSpacing: 2,
+                            fontFamily: 'monospace',
+                          ),
                         ),
                       ),
                     ),
@@ -424,41 +390,47 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
                         },
                         child: SizedBox(
                           height: 240,
+                          width: double.infinity,
                           child: LayoutBuilder(
                             builder: (context, constraints) {
                               final width = constraints.maxWidth;
-                              final int totalSeconds = _duration.inSeconds;
-                              final int totalDataPoints = totalSeconds * 20;
-                              final int barCount = (totalDataPoints / 2)
-                                  .round()
-                                  .clamp(50, 200);
+                              final int totalBars = widget.waveform.length;
+                              final int barCount = totalBars;
                               final cursorIndex =
-                                  _calculateCursorIndex(barCount * 2) ?? 0;
+                                  _calculateCursorIndex(barCount) ?? 0;
                               final markIndices = _calculateMarkIndices(
-                                barCount * 2,
+                                barCount,
                               );
                               return Stack(
                                 alignment: Alignment.center,
                                 children: [
-                                  BarWaveformPainter(
-                                    widget.waveform,
-                                    cursorIndex: cursorIndex,
-                                    barCount: barCount * 2,
-                                    dragOffset: waveformDragOffset,
-                                    isLight: true,
-                                  ).buildWidget(),
-                                  CustomPaint(
-                                    painter: MarksPainter(
-                                      markIndices: markIndices,
-                                      barCount: barCount * 2,
-                                      sortedMarkIndices: markIndices,
+                                  SizedBox(
+                                    width: width,
+                                    height: 240,
+                                    child: BarWaveformPainter(
+                                      widget.waveform,
+                                      cursorIndex: cursorIndex,
+                                      barCount: barCount,
                                       dragOffset: waveformDragOffset,
                                       isLight: true,
-                                      duration: _duration,
-                                      position: _position,
-                                      waveform: widget.waveform,
+                                    ).buildWidget(),
+                                  ),
+                                  SizedBox(
+                                    width: width,
+                                    height: 240,
+                                    child: CustomPaint(
+                                      painter: MarksPainter(
+                                        markIndices: markIndices,
+                                        barCount: barCount,
+                                        sortedMarkIndices: markIndices,
+                                        dragOffset: waveformDragOffset,
+                                        isLight: true,
+                                        duration: _duration,
+                                        position: _position,
+                                        waveform: widget.waveform,
+                                      ),
+                                      size: Size(width, 240),
                                     ),
-                                    size: Size(width, 240),
                                   ),
                                 ],
                               );
@@ -473,24 +445,19 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
                       child: LayoutBuilder(
                         builder: (context, constraints) {
                           final width = constraints.maxWidth;
-                          final int totalSeconds = _duration.inSeconds;
-                          final int totalDataPoints = totalSeconds * 20;
-                          final int barCount = (totalDataPoints / 2)
-                              .round()
-                              .clamp(50, 200);
+                          final int totalBars = widget.waveform.length;
+                          final int barCount = totalBars;
                           final cursorIndex =
-                              _calculateCursorIndex(barCount * 2) ?? 0;
-                          final markIndices = _calculateMarkIndices(
-                            barCount * 2,
-                          );
+                              _calculateCursorIndex(barCount) ?? 0;
+                          final markIndices = _calculateMarkIndices(barCount);
                           return TimeRulerPainter(
                             duration: _duration,
-                            barCount: barCount * 2,
+                            barCount: barCount,
                             cursorIndex: cursorIndex,
                             markIndices: markIndices,
                             dragOffset: waveformDragOffset,
                             isLight: true,
-                            formatFunction: _formatTimeAxis,
+                            formatFunction: _formatDuration,
                             waveform: widget.waveform,
                           ).buildWidget();
                         },
@@ -505,12 +472,14 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
                   ]
                 : [
                     Expanded(
-                      child: SubtitleWithMarksWidget(
-                        subtitles: _subtitles,
-                        position: _displayPosition,
-                        marks: _marks,
-                        audioDuration: _duration,
-                      ),
+                      child: _subtitles.isEmpty
+                          ? const Center(child: Text('暂无字幕'))
+                          : SubtitleWithMarksWidget(
+                              subtitles: _subtitles,
+                              position: _displayPosition,
+                              marks: _marks,
+                              audioDuration: _duration,
+                            ),
                     ),
                   ]),
             const SizedBox(height: 16),
@@ -579,6 +548,7 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
                     final newPosition = Duration(milliseconds: value.toInt());
                     _audioPlayer.seek(newPosition);
                     _position = newPosition; // 立即更新位置状态
+                    _displayPosition = newPosition; // 同步大计时器
                   },
                 ),
               ),
@@ -724,6 +694,33 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
     } catch (e) {
       print('重新开始播放失败: $e');
     }
+  }
+
+  Future<void> _loadSubtitles() async {
+    // 等待音频时长获取
+    while (_duration == Duration.zero) {
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+    final audioLengthSeconds = _duration.inMilliseconds / 1000.0;
+    final subs = await getOrGenerateSubtitles(
+      widget.filePath,
+      audioLengthSeconds,
+    );
+    setState(() {
+      _subtitles = subs;
+    });
+  }
+
+  int? _currentIndex() {
+    if (_subtitles.isEmpty) return null;
+    final t = _displayPosition.inMilliseconds / 1000.0;
+    for (int i = 0; i < _subtitles.length; i++) {
+      final s = _subtitles[i];
+      final bool isLast = i == _subtitles.length - 1;
+      if (t >= s['start'] && (t < s['end'] || (isLast && t <= s['end'])))
+        return i;
+    }
+    return null;
   }
 }
 
@@ -1069,16 +1066,153 @@ class MarksPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }
 
-// 假字幕数据
-final List<Map<String, dynamic>> fakeSubtitle = List.generate(
-  120,
-  (i) => {
-    "start": (i * 2.5).toDouble(),
-    "end": ((i + 1) * 2.5).toDouble(),
-    "text":
-        "第${i + 1}段字幕，时间：${(i * 2.5).toStringAsFixed(1)}~${((i + 1) * 2.5).toStringAsFixed(1)}秒。这里是测试内容，内容可根据需要自行扩展。",
-  },
-);
+// Placeholder: implement PCM extraction from audio file
+Future<List<double>> extractPcmSamples(String audioPath) async {
+  // TODO: Implement actual PCM extraction logic
+  throw UnimplementedError('extractPcmSamples must be implemented');
+}
+
+/// Load waveform data from file, or generate if not exists
+Future<List<double>> getOrGenerateWaveform(
+  String audioPath,
+  int targetPoints,
+  double threshold,
+) async {
+  final waveformPath = audioPath.replaceAll(
+    RegExp(r'\.(wav|aac|m4a|mp3)\$'),
+    '.waveform.json',
+  );
+  final file = File(waveformPath);
+  if (await file.exists()) {
+    final jsonStr = await file.readAsString();
+    final List<dynamic> jsonList = jsonDecode(jsonStr);
+    return jsonList.cast<double>();
+  } else {
+    // 强制用 Rust 处理波形图
+    print('[RustWaveform] 准备调用 Rust FFI 生成波形...');
+    List<double> samples = await extractPcmSamples(audioPath);
+    final rust = RustWaveform();
+    final genWaveform = rust.generateWaveformWithDenoise;
+    final length = samples.length;
+    final samplePtr = calloc<ffi.Float>(length);
+    for (int i = 0; i < length; i++) {
+      samplePtr[i] = samples[i];
+    }
+    final outPtr = calloc<ffi.Float>(targetPoints);
+    genWaveform(samplePtr, length, targetPoints, threshold, outPtr);
+    print('[RustWaveform] Rust FFI 生成波形完成');
+    final result = List<double>.generate(targetPoints, (i) => outPtr[i]);
+    calloc.free(samplePtr);
+    calloc.free(outPtr);
+    final jsonStr = jsonEncode(result);
+    await file.writeAsString(jsonStr);
+    return result;
+  }
+}
+
+Future<String?> findSubtitleFile(String audioPath) async {
+  final audioFile = File(audioPath);
+  final dir = audioFile.parent;
+  final audioName = p.basenameWithoutExtension(audioPath);
+  final subtitlePath = p.join(dir.path, '$audioName.subtitle.json');
+  if (await File(subtitlePath).exists()) {
+    return subtitlePath;
+  }
+  // 若找不到同名字幕，遍历目录找最接近的字幕文件
+  final audioStat = await audioFile.stat();
+  final files = await dir.list().toList();
+  File? bestMatch;
+  Duration? minDiff;
+  for (final f in files) {
+    if (f is File && f.path.endsWith('.subtitle.json')) {
+      final stat = await f.stat();
+      final diff = (stat.modified.difference(audioStat.modified)).abs();
+      if (minDiff == null || diff < minDiff) {
+        minDiff = diff;
+        bestMatch = f;
+      }
+    }
+  }
+  return bestMatch?.path;
+}
+
+Future<List<Map<String, dynamic>>> getOrGenerateSubtitles(
+  String audioPath,
+  double audioLengthSeconds,
+) async {
+  String? subtitlePath = await findSubtitleFile(audioPath);
+  if (subtitlePath != null && await File(subtitlePath).exists()) {
+    try {
+      final jsonStr = await File(subtitlePath).readAsString();
+      final List<dynamic> jsonList = jsonDecode(jsonStr);
+      return jsonList.cast<Map<String, dynamic>>();
+    } catch (e) {
+      throw Exception('Failed to read subtitle json: $e');
+    }
+  } else {
+    // 生成新字幕文件
+    final audioName = p.basenameWithoutExtension(audioPath);
+    final dir = File(audioPath).parent;
+    final newSubtitlePath = p.join(dir.path, '$audioName.subtitle.json');
+    await generateFakeSubtitles(
+      audioPath,
+      audioLengthSeconds,
+      savePath: newSubtitlePath,
+    );
+    final jsonStr = await File(newSubtitlePath).readAsString();
+    final List<dynamic> jsonList = jsonDecode(jsonStr);
+    return jsonList.cast<Map<String, dynamic>>();
+  }
+}
+
+Future<void> generateFakeSubtitles(
+  String audioPath,
+  double audioLengthSeconds, {
+  String? savePath,
+}) async {
+  double current = 0.0;
+  int idx = 1;
+  List<String> sentences = [
+    '春天的花开了，空气中弥漫着淡淡的清香。',
+    '阳光洒在湖面上，波光粼粼，令人心旷神怡。',
+    '小朋友们在公园里欢快地奔跑，笑声回荡在树梢。',
+    '傍晚时分，微风吹过，带来一丝凉意。',
+    '夜幕降临，城市的灯光渐渐亮起，温暖而安静。',
+    '雨后的天空格外清澈，彩虹悄然挂在天边。',
+    '书本的世界丰富多彩，带我们遨游知识的海洋。',
+    '家人围坐在一起，分享着一天的喜悦与收获。',
+    '远方的朋友发来问候，温暖了我的心房。',
+    '努力和坚持终将带来美好的结果。',
+  ];
+  List<Map<String, dynamic>> subtitles = [];
+  while (current < audioLengthSeconds) {
+    double duration = 2.0; // 固定为2秒
+    double start = current;
+    double end = (current + duration).clamp(0, audioLengthSeconds);
+    if (end >= audioLengthSeconds - 0.1) {
+      end = audioLengthSeconds;
+    }
+    // 随机选一句中文句子
+    String text = sentences[(idx - 1) % sentences.length];
+    subtitles.add({'index': idx, 'start': start, 'end': end, 'text': text});
+    if (end >= audioLengthSeconds) break;
+    current = end;
+    idx++;
+  }
+  final audioName = p.basenameWithoutExtension(audioPath);
+  final dir = File(audioPath).parent;
+  final subtitlePath = savePath ?? p.join(dir.path, '$audioName.subtitle.json');
+  final file = File(subtitlePath);
+  await file.writeAsString(jsonEncode(subtitles));
+}
+
+String _randomText(Random random, int length) {
+  const chars = 'abcdefghijklmnopqrstuvwxyz '; // 可自定义字符集
+  return List.generate(
+    length,
+    (_) => chars[random.nextInt(chars.length)],
+  ).join();
+}
 
 class SubtitleWithMarksWidget extends StatefulWidget {
   final List<Map<String, dynamic>> subtitles;
@@ -1136,16 +1270,22 @@ class _SubtitleWithMarksWidgetState extends State<SubtitleWithMarksWidget> {
   }
 
   int? _currentIndex() {
+    if (widget.subtitles.isEmpty) return null;
     final t = widget.position.inMilliseconds / 1000.0;
     for (int i = 0; i < widget.subtitles.length; i++) {
       final s = widget.subtitles[i];
-      if (t >= s['start'] && t < s['end']) return i;
+      final bool isLast = i == widget.subtitles.length - 1;
+      if (t >= s['start'] && (t < s['end'] || (isLast && t <= s['end'])))
+        return i;
     }
     return null;
   }
 
   @override
   Widget build(BuildContext context) {
+    if (widget.subtitles.isEmpty) {
+      return const Center(child: Text('暂无字幕'));
+    }
     final currentIdx = _currentIndex() ?? 0;
     final total = widget.subtitles.length;
 

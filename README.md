@@ -1,4 +1,4 @@
-# Butterfly 录音应用
+t # Butterfly 录音应用
 
 一个功能丰富的Flutter录音应用，支持实时波形显示、标记功能和文件管理。
 
@@ -93,3 +93,103 @@ lib/
 3. 支持更多音频格式
 4. 添加音频效果和滤镜
 5. 实现云端同步功能
+
+## Rust 波形/降噪库编译与集成说明
+
+本项目通过 Rust 实现高性能的音频波形与降噪处理，并通过 FFI 集成到 Flutter。
+如需修改或重新编译 Rust 动态库，请参考以下步骤：
+
+### 1. 安装 Rust 工具链
+
+请确保已安装 Rust（推荐使用 [rustup](https://rustup.rs/)）：
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+### 2. 安装交叉编译工具（Android）
+
+建议使用 [`cargo-ndk`](https://github.com/bbqsrc/cargo-ndk) 简化 Android so 库编译：
+
+```bash
+cargo install cargo-ndk
+```
+
+### 3. 编译 Android so 动态库
+
+在 `butterfly/rust` 目录下执行：
+
+```bash
+cargo ndk -t arm64-v8a -o ../android/app/src/main/jniLibs build --release
+```
+
+- 编译完成后，`libwaveform.so` 会自动拷贝到 `android/app/src/main/jniLibs/arm64-v8a/` 目录。
+
+### 4. 编译 macOS 动态库
+
+```bash
+cargo build --release
+# 生成的 dylib 路径： target/release/libwaveform.dylib
+# 可拷贝到 macos/Runner/ 目录下供 FFI 加载
+```
+
+### 5. 编译 iOS 动态库（可选）
+
+iOS 需生成静态库（.a），并通过 Xcode 配置集成，具体可参考 [flutter_rust_bridge 文档](https://cjycode.com/flutter_rust_bridge/manual/integrate/ios.html)。
+
+### 6. Rust FFI 接口说明
+
+Rust 导出函数 `generate_waveform_with_denoise`，Dart 端通过 FFI 调用，接口定义详见 `lib/rust_waveform.dart`。
+
+### 7. 常见问题
+
+- Android 编译需安装 NDK 并配置环境变量（可用 Android Studio 安装）。
+- 若遇到找不到 so/dylib，请确认路径与平台架构一致。
+- 修改 Rust 代码后需重新编译并覆盖目标平台的动态库。
+
+## Flutter 运行环境搭建与安卓打包
+
+### 1. 安装 Flutter
+
+请参考[官方文档](https://docs.flutter.dev/get-started/install)完成 Flutter 安装。常用步骤如下：
+
+```bash
+git clone https://github.com/flutter/flutter.git -b stable
+export PATH="$PATH:`pwd`/flutter/bin"
+flutter --version
+```
+
+- 建议 Flutter 版本 3.10 及以上。
+- 安装 Android Studio 并配置好 Android SDK、NDK（用于 Rust FFI）。
+
+### 2. 获取依赖
+
+在项目根目录执行：
+
+```bash
+flutter pub get
+```
+
+### 3. 运行项目（真机或模拟器）
+
+```bash
+flutter run
+```
+
+- 首次运行会自动下载依赖和构建缓存，需耐心等待。
+- 如遇权限问题，安卓需授予麦克风、存储权限。
+
+### 4. 打包安卓 APK
+
+```bash
+flutter build apk --release
+```
+
+- 生成的 APK 路径：`build/app/outputs/flutter-apk/app-release.apk`
+- 可直接安装到安卓手机测试。
+
+### 5. 常见问题
+
+- **NDK 配置**：如需 Rust FFI，需在 Android Studio 设置 NDK 路径，并确保 `cargo-ndk` 可用。
+- **权限问题**：如录音失败，请检查应用权限设置。
+- **依赖问题**：如遇依赖冲突，尝试 `flutter clean && flutter pub get`。
