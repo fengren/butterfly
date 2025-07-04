@@ -12,10 +12,12 @@ import 'package:path/path.dart' as p;
 class AudioPlayerPage extends StatefulWidget {
   final String filePath;
   final List<double> waveform;
+  final String? displayName;
   const AudioPlayerPage({
     super.key,
     required this.filePath,
     required this.waveform,
+    this.displayName,
   });
 
   @override
@@ -244,436 +246,443 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
 
   @override
   Widget build(BuildContext context) {
-    if (_subtitles.isEmpty) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    }
-    return Scaffold(
-      backgroundColor: Colors.white, // 极简浅色主题
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        iconTheme: const IconThemeData(color: Colors.black),
-        title: Text(
-          (() {
-            final nameWithExt = widget.filePath
-                .split(Platform.pathSeparator)
-                .last;
-            final name = nameWithExt.contains('.')
-                ? nameWithExt.substring(0, nameWithExt.lastIndexOf('.'))
-                : nameWithExt;
-            return name;
-          })(),
-          style: const TextStyle(
-            color: Colors.black,
-            fontWeight: FontWeight.bold,
+    // 计算音频时长（秒）
+    final audioSeconds = _duration.inSeconds > 0
+        ? _duration.inSeconds
+        : (widget.waveform.length / 16).ceil();
+    final showAllWaveform = audioSeconds < 5;
+    return WillPopScope(
+      onWillPop: () async {
+        if (_isPlaying) {
+          await _audioPlayer.stop();
+        }
+        return true;
+      },
+      child: Scaffold(
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        appBar: AppBar(
+          backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
+          elevation: 0,
+          iconTheme: const IconThemeData(color: Colors.black),
+          title: Text(
+            widget.displayName ?? '录音',
+            style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+          ),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.more_vert, color: Colors.black),
+              onPressed: () {},
+            ),
+          ],
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.black),
+            onPressed: () => Navigator.of(context).pop(),
           ),
         ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.more_vert, color: Colors.black),
-            onPressed: () {},
-          ),
-        ],
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-      ),
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            ...(!_showSubtitle
-                ? [
-                    const SizedBox(height: 16),
-                    // 大号计时器
-                    Center(
-                      child: SizedBox(
-                        width: 180,
-                        child: Text(
-                          _formatDuration(_displayPosition),
-                          textAlign: TextAlign.center,
-                          maxLines: 1,
-                          overflow: TextOverflow.visible,
-                          style: const TextStyle(
-                            fontSize: 32,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.black,
-                            letterSpacing: 2,
-                            fontFamily: 'monospace',
+        body: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              ...(!_showSubtitle
+                  ? [
+                      const SizedBox(height: 16),
+                      // 大号计时器
+                      Center(
+                        child: SizedBox(
+                          width: 180,
+                          child: Text(
+                            _formatDuration(_displayPosition),
+                            textAlign: TextAlign.center,
+                            maxLines: 1,
+                            overflow: TextOverflow.visible,
+                            style: const TextStyle(
+                              fontSize: 32,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black,
+                              letterSpacing: 2,
+                              fontFamily: 'monospace',
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 16),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                      child: GestureDetector(
-                        onHorizontalDragStart: (details) async {
-                          wasPlaying = _isPlaying;
-                          await _audioPlayer.pause();
-                          setState(() {
-                            isDraggingWaveform = true;
-                          });
-                        },
-                        onHorizontalDragUpdate: (details) {
-                          setState(() {
-                            waveformDragOffset += details.delta.dx * 0.15;
-                          });
-                          final width = MediaQuery.of(context).size.width - 16;
-                          final int totalBars = widget.waveform.length;
-                          final percentDelta = -waveformDragOffset / width;
-                          double currentPercent;
-                          if (_position >= _duration) {
-                            currentPercent = 1.0 + percentDelta;
-                          } else {
-                            currentPercent =
-                                (_position.inMilliseconds /
-                                    (_duration.inMilliseconds == 0
-                                        ? 1
-                                        : _duration.inMilliseconds)) +
-                                percentDelta;
-                          }
-                          currentPercent = currentPercent.clamp(0.0, 1.0);
-                          final newMillis =
-                              (currentPercent * _duration.inMilliseconds)
-                                  .toInt();
-                          if (newMillis >= 0 &&
-                              newMillis <= _duration.inMilliseconds) {
+                      const SizedBox(height: 16),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                        child: GestureDetector(
+                          onHorizontalDragStart: (details) async {
+                            wasPlaying = _isPlaying;
+                            await _audioPlayer.pause();
                             setState(() {
-                              _position = Duration(milliseconds: newMillis);
-                              _displayPosition = Duration(
-                                milliseconds: newMillis,
-                              );
+                              isDraggingWaveform = true;
                             });
-                          }
-                        },
-                        onHorizontalDragEnd: (details) async {
-                          final width = MediaQuery.of(context).size.width - 16;
-                          final int totalBars = widget.waveform.length;
-                          final percentDelta = -waveformDragOffset / width;
-                          double currentPercent;
-                          if (_position >= _duration) {
-                            currentPercent = 1.0 + percentDelta;
-                          } else {
-                            currentPercent =
-                                (_position.inMilliseconds /
-                                    (_duration.inMilliseconds == 0
-                                        ? 1
-                                        : _duration.inMilliseconds)) +
-                                percentDelta;
-                          }
-                          currentPercent = currentPercent.clamp(0.0, 1.0);
-                          final newMillis =
-                              (currentPercent * _duration.inMilliseconds)
-                                  .toInt();
-                          setState(() {
-                            isDraggingWaveform = false;
-                            waveformDragOffset = 0.0;
-                          });
-                          if (newMillis >= 0 &&
-                              newMillis <= _duration.inMilliseconds) {
-                            await _audioPlayer.seek(
-                              Duration(milliseconds: newMillis),
-                            );
-                          }
-                          if (_position < _duration) {
-                            if (wasPlaying) await _audioPlayer.resume();
-                          } else {
-                            await _audioPlayer.seek(Duration.zero);
+                          },
+                          onHorizontalDragUpdate: (details) {
                             setState(() {
-                              _position = Duration.zero;
-                              _displayPosition = Duration.zero;
+                              waveformDragOffset += details.delta.dx * 0.15;
                             });
-                            if (wasPlaying) await _audioPlayer.resume();
-                          }
-                        },
-                        child: SizedBox(
-                          height: 240,
-                          width: double.infinity,
-                          child: LayoutBuilder(
-                            builder: (context, constraints) {
-                              final width = constraints.maxWidth;
-                              final int totalBars = widget.waveform.length;
-                              final int barCount = totalBars;
-                              final cursorIndex =
-                                  _calculateCursorIndex(barCount) ?? 0;
-                              final markIndices = _calculateMarkIndices(
-                                barCount,
+                            final width =
+                                MediaQuery.of(context).size.width - 16;
+                            final int totalBars = widget.waveform.length;
+                            final percentDelta = -waveformDragOffset / width;
+                            double currentPercent;
+                            if (_position >= _duration) {
+                              currentPercent = 1.0 + percentDelta;
+                            } else {
+                              currentPercent =
+                                  (_position.inMilliseconds /
+                                      (_duration.inMilliseconds == 0
+                                          ? 1
+                                          : _duration.inMilliseconds)) +
+                                  percentDelta;
+                            }
+                            currentPercent = currentPercent.clamp(0.0, 1.0);
+                            final newMillis =
+                                (currentPercent * _duration.inMilliseconds)
+                                    .toInt();
+                            if (newMillis >= 0 &&
+                                newMillis <= _duration.inMilliseconds) {
+                              setState(() {
+                                _position = Duration(milliseconds: newMillis);
+                                _displayPosition = Duration(
+                                  milliseconds: newMillis,
+                                );
+                              });
+                            }
+                          },
+                          onHorizontalDragEnd: (details) async {
+                            final width =
+                                MediaQuery.of(context).size.width - 16;
+                            final int totalBars = widget.waveform.length;
+                            final percentDelta = -waveformDragOffset / width;
+                            double currentPercent;
+                            if (_position >= _duration) {
+                              currentPercent = 1.0 + percentDelta;
+                            } else {
+                              currentPercent =
+                                  (_position.inMilliseconds /
+                                      (_duration.inMilliseconds == 0
+                                          ? 1
+                                          : _duration.inMilliseconds)) +
+                                  percentDelta;
+                            }
+                            currentPercent = currentPercent.clamp(0.0, 1.0);
+                            final newMillis =
+                                (currentPercent * _duration.inMilliseconds)
+                                    .toInt();
+                            setState(() {
+                              isDraggingWaveform = false;
+                              waveformDragOffset = 0.0;
+                            });
+                            if (newMillis >= 0 &&
+                                newMillis <= _duration.inMilliseconds) {
+                              await _audioPlayer.seek(
+                                Duration(milliseconds: newMillis),
                               );
-                              return Stack(
-                                alignment: Alignment.center,
-                                children: [
-                                  SizedBox(
-                                    width: width,
-                                    height: 240,
-                                    child: BarWaveformPainter(
-                                      widget.waveform,
-                                      cursorIndex: cursorIndex,
-                                      barCount: barCount,
-                                      dragOffset: waveformDragOffset,
-                                      isLight: true,
-                                    ).buildWidget(),
-                                  ),
-                                  SizedBox(
-                                    width: width,
-                                    height: 240,
-                                    child: CustomPaint(
-                                      painter: MarksPainter(
-                                        markIndices: markIndices,
+                            }
+                            if (_position < _duration) {
+                              if (wasPlaying) await _audioPlayer.resume();
+                            } else {
+                              await _audioPlayer.seek(Duration.zero);
+                              setState(() {
+                                _position = Duration.zero;
+                                _displayPosition = Duration.zero;
+                              });
+                              if (wasPlaying) await _audioPlayer.resume();
+                            }
+                          },
+                          child: SizedBox(
+                            height: 240,
+                            width: double.infinity,
+                            child: LayoutBuilder(
+                              builder: (context, constraints) {
+                                final width = constraints.maxWidth;
+                                final int totalBars = widget.waveform.length;
+                                final int barCount = showAllWaveform
+                                    ? totalBars
+                                    : totalBars;
+                                final cursorIndex =
+                                    _calculateCursorIndex(barCount) ?? 0;
+                                final markIndices = _calculateMarkIndices(
+                                  barCount,
+                                );
+                                return Stack(
+                                  alignment: Alignment.center,
+                                  children: [
+                                    SizedBox(
+                                      width: width,
+                                      height: 240,
+                                      child: BarWaveformPainter(
+                                        widget.waveform,
+                                        cursorIndex: cursorIndex,
                                         barCount: barCount,
-                                        sortedMarkIndices: markIndices,
-                                        dragOffset: waveformDragOffset,
+                                        dragOffset: showAllWaveform
+                                            ? 0.0
+                                            : waveformDragOffset,
                                         isLight: true,
-                                        duration: _duration,
-                                        position: _position,
-                                        waveform: widget.waveform,
-                                      ),
-                                      size: Size(width, 240),
+                                      ).buildWidget(),
                                     ),
-                                  ),
-                                ],
-                              );
-                            },
+                                    SizedBox(
+                                      width: width,
+                                      height: 240,
+                                      child: CustomPaint(
+                                        painter: MarksPainter(
+                                          markIndices: markIndices,
+                                          barCount: barCount,
+                                          sortedMarkIndices: markIndices,
+                                          dragOffset: waveformDragOffset,
+                                          isLight: true,
+                                          duration: _duration,
+                                          position: _position,
+                                          waveform: widget.waveform,
+                                        ),
+                                        size: Size(width, 240),
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      ),
+                      SizedBox(
+                        height: 48,
+                        width: double.infinity,
+                        child: LayoutBuilder(
+                          builder: (context, constraints) {
+                            final width = constraints.maxWidth;
+                            final int totalBars = widget.waveform.length;
+                            final int barCount = totalBars;
+                            final cursorIndex =
+                                _calculateCursorIndex(barCount) ?? 0;
+                            final markIndices = _calculateMarkIndices(barCount);
+                            return TimeRulerPainter(
+                              duration: _duration,
+                              barCount: barCount,
+                              cursorIndex: cursorIndex,
+                              markIndices: markIndices,
+                              dragOffset: waveformDragOffset,
+                              isLight: true,
+                              formatFunction: _formatDuration,
+                              waveform: widget.waveform,
+                            ).buildWidget();
+                          },
+                        ),
+                      ),
+
+                      // Spacer 占位
+                      const Spacer(),
+
+                      // 切换按钮固定在底部控制区正上方
+                      const SizedBox(height: 16),
+                    ]
+                  : [
+                      Expanded(
+                        child: _subtitles.isEmpty
+                            ? const Center(child: Text('暂无字幕'))
+                            : SubtitleWithMarksWidget(
+                                subtitles: _subtitles,
+                                position: _displayPosition,
+                                marks: _marks,
+                                audioDuration: _duration,
+                              ),
+                      ),
+                    ]),
+              const SizedBox(height: 16),
+              Center(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.grey[900],
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(color: Colors.black26, blurRadius: 4),
+                    ],
+                  ),
+                  child: TextButton(
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 4,
+                      ),
+                      minimumSize: const Size(0, 32),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onPressed: () {
+                      setState(() {
+                        _showSubtitle = !_showSubtitle;
+                      });
+                    },
+                    child: Text(
+                      _showSubtitle ? '显示声纹' : '显示文本',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              SizedBox(height: 2),
+              // 进度条（极简灰色，下移）
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16.0,
+                  vertical: 8.0,
+                ),
+                child: SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    trackHeight: 4,
+                    thumbShape: const RoundSliderThumbShape(
+                      enabledThumbRadius: 10,
+                    ),
+                    overlayShape: const RoundSliderOverlayShape(
+                      overlayRadius: 20,
+                    ),
+                    activeTrackColor: Colors.grey[400],
+                    inactiveTrackColor: Colors.grey[200],
+                    thumbColor: Colors.black,
+                  ),
+                  child: Slider(
+                    value: _position.inMilliseconds.toDouble().clamp(
+                      0,
+                      _duration.inMilliseconds.toDouble(),
+                    ),
+                    min: 0,
+                    max: _duration.inMilliseconds.toDouble() > 0
+                        ? _duration.inMilliseconds.toDouble()
+                        : 1,
+                    onChanged: (value) {
+                      final newPosition = Duration(milliseconds: value.toInt());
+                      _audioPlayer.seek(newPosition);
+                      _position = newPosition; // 立即更新位置状态
+                      _displayPosition = newPosition; // 同步大计时器
+                    },
+                  ),
+                ),
+              ),
+              // 起止时间显示区域（在进度条下方）
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32.0),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 48,
+                      child: Text(
+                        '00:00',
+                        style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                      ),
+                    ),
+                    Expanded(
+                      child: Center(
+                        child: Text(
+                          _formatTimeAxis(_position),
+                          style: const TextStyle(
+                            color: Colors.black,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
                           ),
                         ),
                       ),
                     ),
                     SizedBox(
-                      height: 48,
-                      width: double.infinity,
-                      child: LayoutBuilder(
-                        builder: (context, constraints) {
-                          final width = constraints.maxWidth;
-                          final int totalBars = widget.waveform.length;
-                          final int barCount = totalBars;
-                          final cursorIndex =
-                              _calculateCursorIndex(barCount) ?? 0;
-                          final markIndices = _calculateMarkIndices(barCount);
-                          return TimeRulerPainter(
-                            duration: _duration,
-                            barCount: barCount,
-                            cursorIndex: cursorIndex,
-                            markIndices: markIndices,
-                            dragOffset: waveformDragOffset,
-                            isLight: true,
-                            formatFunction: _formatDuration,
-                            waveform: widget.waveform,
-                          ).buildWidget();
-                        },
+                      width: 48,
+                      child: Text(
+                        _formatTimeAxis(_duration),
+                        style: TextStyle(color: Colors.grey[600], fontSize: 12),
                       ),
                     ),
-
-                    // Spacer 占位
-                    const Spacer(),
-
-                    // 切换按钮固定在底部控制区正上方
-                    const SizedBox(height: 16),
-                  ]
-                : [
-                    Expanded(
-                      child: _subtitles.isEmpty
-                          ? const Center(child: Text('暂无字幕'))
-                          : SubtitleWithMarksWidget(
-                              subtitles: _subtitles,
-                              position: _displayPosition,
-                              marks: _marks,
-                              audioDuration: _duration,
-                            ),
-                    ),
-                  ]),
-            const SizedBox(height: 16),
-            Center(
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.grey[900],
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4)],
-                ),
-                child: TextButton(
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 24,
-                      vertical: 4,
-                    ),
-                    minimumSize: const Size(0, 32),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  onPressed: () {
-                    setState(() {
-                      _showSubtitle = !_showSubtitle;
-                    });
-                  },
-                  child: Text(
-                    _showSubtitle ? '显示声纹' : '显示文本',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
+                  ],
                 ),
               ),
-            ),
-            SizedBox(height: 2),
-            // 进度条（极简灰色，下移）
-            Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 16.0,
-                vertical: 8.0,
-              ),
-              child: SliderTheme(
-                data: SliderTheme.of(context).copyWith(
-                  trackHeight: 4,
-                  thumbShape: const RoundSliderThumbShape(
-                    enabledThumbRadius: 10,
-                  ),
-                  overlayShape: const RoundSliderOverlayShape(
-                    overlayRadius: 20,
-                  ),
-                  activeTrackColor: Colors.grey[400],
-                  inactiveTrackColor: Colors.grey[200],
-                  thumbColor: Colors.black,
-                ),
-                child: Slider(
-                  value: _position.inMilliseconds.toDouble().clamp(
-                    0,
-                    _duration.inMilliseconds.toDouble(),
-                  ),
-                  min: 0,
-                  max: _duration.inMilliseconds.toDouble() > 0
-                      ? _duration.inMilliseconds.toDouble()
-                      : 1,
-                  onChanged: (value) {
-                    final newPosition = Duration(milliseconds: value.toInt());
-                    _audioPlayer.seek(newPosition);
-                    _position = newPosition; // 立即更新位置状态
-                    _displayPosition = newPosition; // 同步大计时器
-                  },
-                ),
-              ),
-            ),
-            // 起止时间显示区域（在进度条下方）
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 32.0),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 48,
-                    child: Text(
-                      '00:00',
-                      style: TextStyle(color: Colors.grey[600], fontSize: 12),
+              const SizedBox(height: 16),
+              // 底部控制区
+              Padding(
+                padding: const EdgeInsets.only(top: 1, bottom: 32.0),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    // 左侧按钮组
+                    SizedBox(width: 24),
+                    IconButton(
+                      onPressed: _addMark,
+                      icon: Icon(Icons.flag, color: Colors.black, size: 28),
                     ),
-                  ),
-                  Expanded(
-                    child: Center(
-                      child: Text(
-                        _formatTimeAxis(_position),
-                        style: const TextStyle(
-                          color: Colors.black,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
+                    SizedBox(width: 16),
+                    _QuickSeekButton(
+                      forward: false,
+                      seconds: 5,
+                      onTap: () {
+                        final newPosition =
+                            _position - const Duration(seconds: 5);
+                        if (newPosition.inMilliseconds >= 0) {
+                          _audioPlayer.seek(newPosition);
+                          _position = newPosition;
+                        } else {
+                          _audioPlayer.seek(Duration.zero);
+                          _position = Duration.zero;
+                        }
+                      },
+                    ),
+                    // 左侧占位
+                    Expanded(child: SizedBox()),
+                    // 播放/暂停按钮（居中）
+                    GestureDetector(
+                      onTap: _playPause,
+                      child: Container(
+                        width: 72,
+                        height: 72,
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.white,
+                          boxShadow: [
+                            BoxShadow(color: Colors.black12, blurRadius: 8),
+                          ],
+                        ),
+                        child: Icon(
+                          _isPlaying ? Icons.pause : Icons.play_arrow,
+                          size: 36,
+                          color: Theme.of(context).iconTheme.color,
                         ),
                       ),
                     ),
-                  ),
-                  SizedBox(
-                    width: 48,
-                    child: Text(
-                      _formatTimeAxis(_duration),
-                      style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                    // 右侧占位
+                    Expanded(child: SizedBox()),
+                    // 右侧按钮组
+                    _QuickSeekButton(
+                      forward: true,
+                      seconds: 5,
+                      onTap: () {
+                        final newPosition =
+                            _position + const Duration(seconds: 5);
+                        if (newPosition.inMilliseconds <=
+                            _duration.inMilliseconds) {
+                          _audioPlayer.seek(newPosition);
+                          _position = newPosition;
+                        } else {
+                          _audioPlayer.seek(_duration);
+                          _position = _duration;
+                        }
+                      },
                     ),
-                  ),
-                ],
+                    SizedBox(width: 16),
+                    TextButton(
+                      onPressed: _togglePlaybackRate,
+                      child: Text(
+                        '${_playbackRate.toStringAsFixed(_playbackRate == _playbackRate.toInt() ? 0 : 1)}x',
+                        style: const TextStyle(
+                          color: Colors.black,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                        ),
+                      ),
+                    ),
+                    SizedBox(width: 24),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
-            // 底部控制区
-            Padding(
-              padding: const EdgeInsets.only(top: 1, bottom: 32.0),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  // 左侧按钮组
-                  SizedBox(width: 24),
-                  IconButton(
-                    onPressed: _addMark,
-                    icon: Icon(Icons.flag, color: Colors.black, size: 28),
-                  ),
-                  SizedBox(width: 16),
-                  _QuickSeekButton(
-                    forward: false,
-                    seconds: 5,
-                    onTap: () {
-                      final newPosition =
-                          _position - const Duration(seconds: 5);
-                      if (newPosition.inMilliseconds >= 0) {
-                        _audioPlayer.seek(newPosition);
-                        _position = newPosition;
-                      } else {
-                        _audioPlayer.seek(Duration.zero);
-                        _position = Duration.zero;
-                      }
-                    },
-                  ),
-                  // 左侧占位
-                  Expanded(child: SizedBox()),
-                  // 播放/暂停按钮（居中）
-                  GestureDetector(
-                    onTap: _playPause,
-                    child: Container(
-                      width: 72,
-                      height: 72,
-                      decoration: const BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: Colors.white,
-                        boxShadow: [
-                          BoxShadow(color: Colors.black12, blurRadius: 8),
-                        ],
-                      ),
-                      child: Icon(
-                        _isPlaying ? Icons.pause : Icons.play_arrow,
-                        size: 36,
-                        color: Colors.black,
-                      ),
-                    ),
-                  ),
-                  // 右侧占位
-                  Expanded(child: SizedBox()),
-                  // 右侧按钮组
-                  _QuickSeekButton(
-                    forward: true,
-                    seconds: 5,
-                    onTap: () {
-                      final newPosition =
-                          _position + const Duration(seconds: 5);
-                      if (newPosition.inMilliseconds <=
-                          _duration.inMilliseconds) {
-                        _audioPlayer.seek(newPosition);
-                        _position = newPosition;
-                      } else {
-                        _audioPlayer.seek(_duration);
-                        _position = _duration;
-                      }
-                    },
-                  ),
-                  SizedBox(width: 16),
-                  TextButton(
-                    onPressed: _togglePlaybackRate,
-                    child: Text(
-                      '${_playbackRate.toStringAsFixed(_playbackRate == _playbackRate.toInt() ? 0 : 1)}x',
-                      style: const TextStyle(
-                        color: Colors.black,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 18,
-                      ),
-                    ),
-                  ),
-                  SizedBox(width: 24),
-                ],
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -747,7 +756,7 @@ class _QuickSeekButton extends StatelessWidget {
         ),
         child: Icon(
           forward ? Icons.forward_5 : Icons.replay_5,
-          color: Colors.black,
+          color: Theme.of(context).iconTheme.color,
           size: 32,
         ),
       ),

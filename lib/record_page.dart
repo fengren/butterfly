@@ -81,22 +81,23 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
 
     // 请求存储权限（Android）
     if (Platform.isAndroid) {
-      // 请求麦克风权限
       if (await Permission.microphone.request() != PermissionStatus.granted) {
         print('麦克风权限被拒绝');
         return;
       }
-
-      // 对于较老版本，请求存储权限
       if (await Permission.storage.request() != PermissionStatus.granted) {
         print('存储权限被拒绝，尝试继续录音');
-        // 不直接返回，因为应用文档目录可能不需要特殊权限
       }
     }
 
     final dir = await getApplicationDocumentsDirectory();
-    final fileName = '${_generateRandomId()}.aac';
-    _filePath = '${dir.path}/$fileName';
+    final folderName = _generateFolderName();
+    final folder = Directory('${dir.path}/$folderName');
+    if (!await folder.exists()) {
+      await folder.create(recursive: true);
+    }
+    final filePath = '${folder.path}/audio.aac'; // 强制文件名
+    _filePath = filePath;
 
     try {
       await _recorder.start(
@@ -120,30 +121,20 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
         _marks.clear();
       });
 
-      // 启动定时器，但减少setState调用频率
       _timer = Timer.periodic(const Duration(milliseconds: 62), (_) {
         if (!_isPaused && _isRecording) {
-          // 更新持续时间
           _duration += const Duration(milliseconds: 62);
-
-          // 生成波形数据
           final random = Random();
           final amplitude = 0.2 + 0.8 * random.nextDouble();
           _waveform.add(amplitude);
-
-          // 限制波形数据长度，避免内存溢出
           if (_waveform.length > maxBars) {
             _waveform.removeAt(0);
           }
-
-          // 每8次数据采集才更新一次UI（约每秒2次更新，更流畅）
           if (_waveform.length % 8 == 0) {
             setState(() {});
           }
         }
       });
-
-      // 启动波形动画，使用更快的重复频率
       _waveformController.repeat();
     } catch (e) {
       print('开始录音失败: $e');
@@ -222,7 +213,9 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
           if (fileSize > 0) {
             await _saveWaveformData();
             await _saveMarksData();
+            await _saveSubtitleData([]);
             print('录音完成，文件大小正常');
+            await _addToMetaData();
           } else {
             print('警告：录音文件大小为0，可能录音失败');
           }
@@ -245,18 +238,19 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
   Future<void> _saveWaveformData() async {
     try {
       final normalizedWaveData = _normalizeWaveData(_waveform);
-      final waveFile = File('${_filePath!}.wave.json');
+      final folder = File(_filePath!).parent;
+      final waveFile = File('${folder.path}/wave.json');
       await waveFile.writeAsString(jsonEncode(normalizedWaveData));
       print('波形数据已保存到: ${waveFile.path}');
     } catch (e) {
       print('保存波形数据时出错: $e');
-      // 生成默认波形数据
       try {
         final defaultWaveData = List.generate(
-          200, // 调整默认数据量，假设10秒音频，每秒20个数据
+          200,
           (index) => (0.2 + 0.4 * (index % 10) / 10.0).toDouble(),
         );
-        final waveFile = File('${_filePath!}.wave.json');
+        final folder = File(_filePath!).parent;
+        final waveFile = File('${folder.path}/wave.json');
         await waveFile.writeAsString(jsonEncode(defaultWaveData));
         print('已生成默认波形数据');
       } catch (e2) {
@@ -270,11 +264,59 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
       final marksData = _marks
           .map((duration) => duration.inMilliseconds)
           .toList();
-      final marksFile = File('${_filePath!}.marks.json');
+      final folder = File(_filePath!).parent;
+      final marksFile = File('${folder.path}/marks.json');
       await marksFile.writeAsString(jsonEncode(marksData));
       print('标记数据已保存到: ${marksFile.path}');
     } catch (e) {
       print('保存标记数据时出错: $e');
+    }
+  }
+
+  Future<void> _saveSubtitleData(List<Map<String, dynamic>> subtitles) async {
+    try {
+      final folder = File(_filePath!).parent;
+      final subtitleFile = File('${folder.path}/subtitle.json');
+      await subtitleFile.writeAsString(jsonEncode(subtitles));
+      print('字幕数据已保存到: ${subtitleFile.path}');
+    } catch (e) {
+      print('保存字幕数据时出错: $e');
+    }
+  }
+
+  Future<void> _addToMetaData() async {
+    final dir = await getApplicationDocumentsDirectory();
+    final folder = File(_filePath!).parent;
+    final timeKey = folder.path.split(Platform.pathSeparator).last;
+    // 文件名直接为 marks.json、wave.json、subtitle.json
+    final audioFileName = 'audio.aac';
+    final audioRelPath = '$timeKey/$audioFileName';
+    final waveRelPath = '$timeKey/wave.json';
+    final marksRelPath = '$timeKey/marks.json';
+    final subtitleRelPath = '$timeKey/subtitle.json';
+    final metaFile = File('${dir.path}/meta.json');
+    print('meta.json 路径: ${metaFile.path}');
+    print('写入meta.json: $timeKey');
+    List<dynamic> metaList = [];
+    try {
+      if (await metaFile.exists()) {
+        metaList = jsonDecode(await metaFile.readAsString());
+      }
+      metaList.add({
+        'id': timeKey,
+        'audioPath': audioRelPath,
+        'wavePath': waveRelPath,
+        'marksPath': marksRelPath,
+        'subtitlePath': subtitleRelPath,
+        'displayName': timeKey,
+        'tag': '--',
+        'created': DateTime.now().toIso8601String(),
+        'played': false,
+      });
+      await metaFile.writeAsString(jsonEncode(metaList));
+      print('meta.json 写入成功');
+    } catch (e) {
+      print('meta.json 写入失败: $e');
     }
   }
 
@@ -297,6 +339,17 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
     return '${year}-${month}-${day}_${hour}_${minute}_${second}';
   }
 
+  String _generateFolderName() {
+    final now = DateTime.now();
+    final year = now.year;
+    final month = now.month.toString().padLeft(2, '0');
+    final day = now.day.toString().padLeft(2, '0');
+    final hour = now.hour.toString().padLeft(2, '0');
+    final minute = now.minute.toString().padLeft(2, '0');
+    final second = now.second.toString().padLeft(2, '0');
+    return '${year}${month}${day}_${hour}${minute}${second}';
+  }
+
   String _formatTimer(Duration d) {
     String two(int n) => n.toString().padLeft(2, '0');
     String hundredths = ((d.inMilliseconds % 1000) ~/ 10).toString().padLeft(
@@ -317,9 +370,9 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
         return true;
       },
       child: Scaffold(
-        backgroundColor: Colors.white, // 极简浅色主题
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         appBar: AppBar(
-          backgroundColor: Colors.white,
+          backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
           elevation: 0,
           iconTheme: const IconThemeData(color: Colors.black),
           title: const Text(
@@ -417,7 +470,11 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
                     // 标记按钮
                     IconButton(
                       onPressed: _isRecording && !_isPaused ? _addMark : null,
-                      icon: Icon(Icons.flag, color: Colors.black, size: 28),
+                      icon: Icon(
+                        Icons.flag,
+                        color: Theme.of(context).iconTheme.color,
+                        size: 28,
+                      ),
                     ),
                     // 录音/停止大圆按钮（始终居中）
                     GestureDetector(
@@ -428,9 +485,6 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           color: _isRecording ? Colors.red : Colors.black,
-                          boxShadow: [
-                            BoxShadow(color: Colors.black12, blurRadius: 8),
-                          ],
                         ),
                         child: Icon(
                           _isRecording ? Icons.stop : Icons.mic,
@@ -444,7 +498,9 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
                       onPressed: _isRecording ? _togglePause : null,
                       icon: Icon(
                         _isPaused ? Icons.play_arrow : Icons.pause,
-                        color: _isRecording ? Colors.black : Colors.grey[400],
+                        color: _isRecording
+                            ? Theme.of(context).iconTheme.color
+                            : Colors.grey[400],
                         size: 28,
                       ),
                     ),
@@ -513,8 +569,11 @@ class VerticalWaveformPainter extends CustomPainter {
     }
     // 标记点
     for (final mark in marks) {
-      int markIdx = (mark.inMilliseconds / 1000 * _RecordPageState.sampleRate)
-          .round();
+      final seconds = mark.inMilliseconds / 1000.0;
+      final idx =
+          (seconds.isNaN || seconds.isInfinite ? 0 : seconds) *
+          (_RecordPageState.sampleRate > 0 ? _RecordPageState.sampleRate : 1);
+      int markIdx = idx.round();
       double x = centerX + (markIdx - totalBars) * spacing;
       if (x < 0 || x > size.width) continue;
       final Paint markPaint = Paint()
@@ -570,8 +629,9 @@ class _TimeRulerPainterImpl extends CustomPainter {
     for (int i = -15; i <= 15; i++) {
       int second = totalSeconds + i;
       if (second < 0) continue;
-      int dataIdx = second * sampleRate;
+      int dataIdx = (sampleRate > 0 ? second * sampleRate : 0);
       double x = centerX + (dataIdx - totalBars) * spacing;
+      if (x.isNaN || x.isInfinite) x = 0.0;
       // 主刻度
       canvas.drawLine(Offset(x, 0), Offset(x, 16), tickPaint);
       // 时间数字（每1秒显示一次，格式00:01）
