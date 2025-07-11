@@ -9,8 +9,13 @@ import 'package:provider/provider.dart';
 import 'theme_notifier.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'services/auth_service.dart';
+import 'debug_console_page.dart';
+import 'package:http/http.dart' as http;
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await AuthService.login();
   runApp(
     ChangeNotifierProvider(
       create: (_) => ThemeNotifier(),
@@ -128,10 +133,9 @@ class _AppFilesPageState extends State<AppFilesPage> {
   IconData _iconForFile(FileSystemEntity entity) {
     if (entity is Directory) return Icons.folder;
     final name = entity.path.toLowerCase();
-    if (name.endsWith('.aac') ||
+    if (name.endsWith('.mp3') ||
         name.endsWith('.m4a') ||
-        name.endsWith('.wav') ||
-        name.endsWith('.mp3')) {
+        name.endsWith('.wav')) {
       return Icons.audiotrack;
     }
     if (name.endsWith('.json')) return Icons.description;
@@ -259,11 +263,13 @@ class _FileListPageState extends State<FileListPage> {
   bool loading = true;
   final Map<String, String> _durationCache = {};
   Map<FileSystemEntity, String> _fileTags = {};
+  String _audioQuality = 'wav';
 
   @override
   void initState() {
     super.initState();
     _loadFiles();
+    _loadAudioQuality();
   }
 
   Future<void> _loadMetaData() async {
@@ -299,10 +305,9 @@ class _FileListPageState extends State<FileListPage> {
         if (f is File) {
           final path = f.path;
           final lower = path.toLowerCase();
-          if (lower.endsWith('.aac') ||
+          if (lower.endsWith('.mp3') ||
               lower.endsWith('.m4a') ||
-              lower.endsWith('.wav') ||
-              lower.endsWith('.mp3')) {
+              lower.endsWith('.wav')) {
             // 取文件夹名为id
             final parts = path.replaceFirst(dir.path + '/', '').split('/');
             if (parts.length < 2) continue;
@@ -359,9 +364,24 @@ class _FileListPageState extends State<FileListPage> {
     }
   }
 
+  Future<void> _loadAudioQuality() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _audioQuality = prefs.getString('audio_quality') ?? 'wav';
+    });
+  }
+
+  Future<void> _setAudioQuality(String quality) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('audio_quality', quality);
+    setState(() {
+      _audioQuality = quality;
+    });
+  }
+
   Future<void> _renameFile(Map<String, dynamic> meta) async {
     final audioPath = meta['audioPath'] as String;
-    final extension = '.aac'; // 始终为 audio.aac
+    final extension = '.mp3'; // 始终为 audio.mp3
     final nameWithoutExt = meta['displayName'] ?? audioPath.split('/').first;
     final textController = TextEditingController(text: nameWithoutExt);
     final newName = await showDialog<String>(
@@ -672,7 +692,16 @@ class _FileListPageState extends State<FileListPage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              _buildMenuItem(context, Icons.text_snippet, 'AI转文字', pro: true),
+              _buildMenuItem(
+                context,
+                Icons.text_snippet,
+                'AI转文字',
+                pro: true,
+                onTap: () async {
+                  Navigator.pop(context);
+                  await _handleAiTranscribe(meta);
+                },
+              ),
               _buildMenuItem(
                 context,
                 Icons.edit,
@@ -965,6 +994,171 @@ class _FileListPageState extends State<FileListPage> {
     }
   }
 
+  Future<void> _handleAiTranscribe(Map<String, dynamic> meta) async {
+    final audioPath = meta['audioPath'] as String;
+    final dir = await getApplicationDocumentsDirectory();
+    final file = File('${dir.path}/$audioPath');
+    if (!await file.exists()) {
+      DebugConsoleLog.log('[AI转文字] 音频文件不存在: ${file.path}');
+      _showSnackBar('音频文件不存在');
+      return;
+    }
+    final fileSize = await file.length();
+    final fileName = file.path.split(Platform.pathSeparator).last;
+    final ext = fileName.contains('.')
+        ? fileName.substring(fileName.lastIndexOf('.'))
+        : '';
+    final displayName = meta['displayName'] ?? fileName;
+    final filenameWithExt = displayName + ext;
+    final formatType = ext.replaceFirst('.', '');
+    final baseUrl = 'https://liangyi.29gpt.com';
+    final createUrl = '$baseUrl/api/v1/audio-files/';
+    final accessToken = await AuthService.getAccessToken();
+    // 新增：如果已上传，直接查状态
+    if (meta['upload_status'] == 'uploaded' && meta['audio_file_id'] != null) {
+      final detailUrl = '$baseUrl/api/v1/audio-files/${meta['audio_file_id']}/';
+      DebugConsoleLog.log('[AI转文字] 查询转写状态...\nGET $detailUrl');
+      final detailResp = await http.get(
+        Uri.parse(detailUrl),
+        headers: {
+          'accept': 'application/json',
+          'Authorization': 'Bearer $accessToken',
+        },
+      );
+      DebugConsoleLog.log(
+        '[AI转文字] 状态查询响应: ' +
+            detailResp.statusCode.toString() +
+            '\n' +
+            detailResp.body,
+      );
+      if (detailResp.statusCode == 200) {
+        final detailData = jsonDecode(detailResp.body);
+        // 写入 subtitle.json
+        final subtitlePath = File('${dir.path}/${meta['subtitlePath']}');
+        await subtitlePath.writeAsString(jsonEncode(detailData));
+        // 新增：提取 summary 字段写入 summary.json
+        if (detailData is Map &&
+            detailData['data'] != null &&
+            detailData['data']['summary'] != null) {
+          final summary = detailData['data']['summary'];
+          final summaryPath = File(
+            '${dir.path}/${meta['audioPath']}'.replaceAll(
+              RegExp(r'/[^/]+$'),
+              '/summary.json',
+            ),
+          );
+          await summaryPath.writeAsString(jsonEncode({'summary': summary}));
+        }
+        _showSnackBar('转写状态已写入subtitle.json和summary.json');
+      } else {
+        _showSnackBar('获取转写状态失败');
+      }
+      return;
+    }
+    try {
+      // 1. 创建音频文件记录
+      DebugConsoleLog.log(
+        '[AI转文字] 创建音频文件记录...\nPOST $createUrl\nBody: ' +
+            jsonEncode({
+              'filename': filenameWithExt,
+              'display_name': displayName,
+              'file_size': fileSize,
+              'format': formatType,
+            }),
+      );
+      final createResp = await http.post(
+        Uri.parse(createUrl),
+        headers: {
+          'accept': 'application/json',
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $accessToken',
+        },
+        body: jsonEncode({
+          'filename': filenameWithExt,
+          'display_name': displayName,
+          'file_size': fileSize,
+          'format': formatType,
+        }),
+      );
+      DebugConsoleLog.log(
+        '[AI转文字] 创建音频文件响应: ' +
+            createResp.statusCode.toString() +
+            '\n' +
+            createResp.body,
+      );
+      final createData = jsonDecode(createResp.body);
+      if (createResp.statusCode != 201 || createData['code'] != 0) {
+        _showSnackBar('创建音频文件失败');
+        return;
+      }
+      final audioFileId = createData['data']['audio_file_id'];
+      final uploadUrl = createData['data']['upload_url'];
+      // 写入meta
+      meta['audio_file_id'] = audioFileId;
+      meta['upload_status'] = 'created';
+      await _saveMetaData();
+      // 2. 上传音频文件
+      DebugConsoleLog.log(
+        '[AI转文字] 上传音频文件...\nPUT $uploadUrl\nBody: <binary ${fileSize} bytes>',
+      );
+      final uploadResp = await http.put(
+        Uri.parse(uploadUrl),
+        headers: {'Content-Type': 'application/octet-stream'},
+        body: file.readAsBytesSync(),
+      );
+      DebugConsoleLog.log(
+        '[AI转文字] 上传响应: ' +
+            uploadResp.statusCode.toString() +
+            '\n' +
+            uploadResp.body,
+      );
+      if (!(uploadResp.statusCode == 200 ||
+          uploadResp.statusCode == 201 ||
+          uploadResp.statusCode == 204)) {
+        meta['upload_status'] = 'upload_failed';
+        await _saveMetaData();
+        _showSnackBar('音频上传失败');
+        return;
+      }
+      meta['upload_status'] = 'uploaded';
+      await _saveMetaData();
+      // 3. 更新音频文件状态
+      DebugConsoleLog.log(
+        '[AI转文字] 更新音频文件状态...\nPUT $createUrl\nBody: ' +
+            jsonEncode({'id': meta['audio_file_id'], 'status': 'uploaded'}),
+      );
+      final updateResp = await http.put(
+        Uri.parse(createUrl),
+        headers: {
+          'accept': 'application/json',
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $accessToken',
+        },
+        body: jsonEncode({'id': meta['audio_file_id'], 'status': 'uploaded'}),
+      );
+      DebugConsoleLog.log(
+        '[AI转文字] 状态更新响应: ' +
+            updateResp.statusCode.toString() +
+            '\n' +
+            updateResp.body,
+      );
+      final updateData = jsonDecode(updateResp.body);
+      if (updateResp.statusCode == 200 && updateData['code'] == 0) {
+        _showSnackBar('音频上传成功，已提交转写');
+      } else {
+        _showSnackBar('音频状态更新失败');
+      }
+    } catch (e) {
+      DebugConsoleLog.log('[AI转文字] 异常: $e');
+      _showSnackBar('AI转文字失败: $e');
+    }
+  }
+
+  void _showSnackBar(String msg) {
+    final ctx = context;
+    ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1071,6 +1265,33 @@ class _FileListPageState extends State<FileListPage> {
             ),
             ListTile(
               leading: Icon(
+                Icons.high_quality,
+                color: Theme.of(context).iconTheme.color,
+              ),
+              title: Text(
+                '音质选择',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onBackground,
+                ),
+              ),
+              subtitle: Row(
+                children: [
+                  ChoiceChip(
+                    label: Text('WAV'),
+                    selected: _audioQuality == 'wav',
+                    onSelected: (v) => _setAudioQuality('wav'),
+                  ),
+                  SizedBox(width: 12),
+                  ChoiceChip(
+                    label: Text('AAC'),
+                    selected: _audioQuality == 'aac',
+                    onSelected: (v) => _setAudioQuality('aac'),
+                  ),
+                ],
+              ),
+            ),
+            ListTile(
+              leading: Icon(
                 Icons.settings,
                 color: Theme.of(context).iconTheme.color,
               ),
@@ -1131,6 +1352,22 @@ class _FileListPageState extends State<FileListPage> {
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => AppFilesPage()),
+              ),
+            ),
+            ListTile(
+              leading: Icon(
+                Icons.bug_report,
+                color: Theme.of(context).iconTheme.color,
+              ),
+              title: Text(
+                '调试控制台',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onBackground,
+                ),
+              ),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => DebugConsolePage()),
               ),
             ),
           ],
@@ -1195,6 +1432,7 @@ class _FileListPageState extends State<FileListPage> {
                         final ext = dotIdx > 0
                             ? fileName.substring(dotIdx)
                             : '';
+                        final filenameWithExt = displayName + ext;
                         final tag = meta['tag'] ?? '--';
                         final played = meta['played'] == true;
                         final modifiedTime = meta['created'] != null

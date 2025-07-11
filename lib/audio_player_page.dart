@@ -48,6 +48,8 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
   List<Map<String, dynamic>> _subtitles = [];
   bool _showFullSubtitle = false;
   bool _showSubtitle = false;
+  bool _showSummary = false;
+  String? _summaryText;
 
   @override
   void initState() {
@@ -490,37 +492,120 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
                     ]),
               const SizedBox(height: 16),
               Center(
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: Colors.grey[900],
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(color: Colors.black26, blurRadius: 4),
-                    ],
-                  ),
-                  child: TextButton(
-                    style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 24,
-                        vertical: 4,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.grey[900],
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: [
+                          BoxShadow(color: Colors.black26, blurRadius: 4),
+                        ],
                       ),
-                      minimumSize: const Size(0, 32),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                    onPressed: () {
-                      setState(() {
-                        _showSubtitle = !_showSubtitle;
-                      });
-                    },
-                    child: Text(
-                      _showSubtitle ? '显示声纹' : '显示文本',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
+                      child: TextButton(
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 24,
+                            vertical: 4,
+                          ),
+                          minimumSize: const Size(0, 32),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            _showSubtitle = !_showSubtitle;
+                          });
+                        },
+                        child: Text(
+                          _showSubtitle ? '显示声纹' : '显示文本',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
                       ),
                     ),
-                  ),
+                    SizedBox(width: 12),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.orange[50],
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: [
+                          BoxShadow(color: Colors.black12, blurRadius: 2),
+                        ],
+                      ),
+                      child: TextButton.icon(
+                        icon: Icon(Icons.lightbulb, color: Colors.orange),
+                        label: Text(
+                          'AI总结',
+                          style: TextStyle(
+                            color: Colors.orange[900],
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 4,
+                          ),
+                          minimumSize: const Size(0, 32),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        onPressed: () async {
+                          final summaryFile = File(
+                            widget.filePath.replaceAll(
+                              RegExp(r'/[^/]+$'),
+                              '/summary.json',
+                            ),
+                          );
+                          if (await summaryFile.exists()) {
+                            final content = await summaryFile.readAsString();
+                            final data = jsonDecode(content);
+                            setState(() {
+                              _summaryText =
+                                  data['summary']?.toString() ?? '无AI总结';
+                              _showSummary = true;
+                            });
+                            showDialog(
+                              context: context,
+                              builder: (ctx) => AlertDialog(
+                                title: Text('AI总结'),
+                                content: SingleChildScrollView(
+                                  child: Text(_summaryText ?? '无AI总结'),
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(ctx),
+                                    child: Text('关闭'),
+                                  ),
+                                ],
+                              ),
+                            );
+                          } else {
+                            setState(() {
+                              _summaryText = '无AI总结';
+                            });
+                            showDialog(
+                              context: context,
+                              builder: (ctx) => AlertDialog(
+                                title: Text('AI总结'),
+                                content: Text('无AI总结'),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(ctx),
+                                    child: Text('关闭'),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }
+                        },
+                      ),
+                    ),
+                  ],
                 ),
               ),
               SizedBox(height: 2),

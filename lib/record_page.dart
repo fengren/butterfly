@@ -10,6 +10,7 @@ import 'dart:ui';
 import 'rust_waveform.dart';
 import 'dart:ffi' as ffi;
 import 'package:ffi/ffi.dart'; // for calloc
+import 'package:shared_preferences/shared_preferences.dart';
 
 class RecordPage extends StatefulWidget {
   const RecordPage({super.key});
@@ -96,13 +97,19 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
     if (!await folder.exists()) {
       await folder.create(recursive: true);
     }
-    final filePath = '${folder.path}/audio.aac'; // 强制文件名
+    final prefs = await SharedPreferences.getInstance();
+    final quality = prefs.getString('audio_quality') ?? 'wav';
+    String ext = quality == 'aac' ? 'aac' : 'wav';
+    AudioEncoder encoder = quality == 'aac'
+        ? AudioEncoder.aacLc
+        : AudioEncoder.wav;
+    final filePath = '${folder.path}/audio.$ext'; // 动态文件名
     _filePath = filePath;
 
     try {
       await _recorder.start(
-        const RecordConfig(
-          encoder: AudioEncoder.aacLc,
+        RecordConfig(
+          encoder: encoder,
           sampleRate: 44100,
           numChannels: 1,
           bitRate: 128000,
@@ -289,7 +296,9 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
     final folder = File(_filePath!).parent;
     final timeKey = folder.path.split(Platform.pathSeparator).last;
     // 文件名直接为 marks.json、wave.json、subtitle.json
-    final audioFileName = 'audio.aac';
+    final prefs = await SharedPreferences.getInstance();
+    final quality = prefs.getString('audio_quality') ?? 'wav';
+    final audioFileName = 'audio.$quality';
     final audioRelPath = '$timeKey/$audioFileName';
     final waveRelPath = '$timeKey/wave.json';
     final marksRelPath = '$timeKey/marks.json';
