@@ -1,0 +1,5 @@
+
+enum HistoryType {
+  recording,
+  share,
+}

@@ -26,9 +26,9 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
   Timer? _timer;
   Duration _duration = Duration.zero;
   String? _filePath;
-  List<double> _waveform = [];
-  List<Duration> _marks = [];
-  double _currentAmplitude = 0.5; // 实时音量
+  final List<double> _waveform = [];
+  final List<Duration> _marks = [];
+  final double _currentAmplitude = 0.5; // 实时音量
   static const int sampleRate = 16; // 每秒16个采样点
   static const int maxBars = 800; // 最多显示的波形条数
 
@@ -345,7 +345,7 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
     final minute = now.minute.toString().padLeft(2, '0');
     final second = now.second.toString().padLeft(2, '0');
 
-    return '${year}-${month}-${day}_${hour}_${minute}_${second}';
+    return '$year-$month-${day}_${hour}_${minute}_$second';
   }
 
   String _generateFolderName() {
@@ -356,7 +356,7 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
     final hour = now.hour.toString().padLeft(2, '0');
     final minute = now.minute.toString().padLeft(2, '0');
     final second = now.second.toString().padLeft(2, '0');
-    return '${year}${month}${day}_${hour}${minute}${second}';
+    return '$year$month${day}_$hour$minute$second';
   }
 
   String _formatTimer(Duration d) {

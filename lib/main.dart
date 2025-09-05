@@ -1,3 +1,4 @@
+import 'package:butterfly/shared/services/share_handler_service.dart';
 import 'package:flutter/material.dart';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
@@ -12,9 +13,23 @@ import 'package:audioplayers/audioplayers.dart';
 import 'services/auth_service.dart';
 import 'debug_console_page.dart';
 import 'package:http/http.dart' as http;
+import 'shared/services/share_receiver_service.dart';
+import 'shared/pages/share_detail_page.dart';
+import 'shared/models/shared_content.dart';
+import 'shared/models/share_content.dart';
+import 'dart:async';
+import 'models/unified_file_item.dart';
+import 'services/unified_file_service.dart';
+import 'shared/services/local_storage_service.dart';
+import 'shared/widgets/enhanced_card/enhanced_card.dart';
+import 'shared/models/unified_history.dart';
+import 'shared/models/content_type.dart';
+
+final shareHandlerService = ShareHandlerService();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // 注意：ShareHandlerService 将在 MyApp 初始化后启动
   await AuthService.login();
   runApp(
     ChangeNotifierProvider(
@@ -24,13 +39,29 @@ void main() async {
   );
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  @override
+  void initState() {
+    super.initState();
+    // 在下一帧初始化 ShareHandlerService，确保 MaterialApp 已完全创建
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      print('🔄 延迟初始化 ShareHandlerService');
+      shareHandlerService.init();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final themeNotifier = Provider.of<ThemeNotifier>(context);
     return MaterialApp(
+      navigatorKey: navigatorKey,
       title: '录音播放器',
       theme: ThemeData.light(),
       darkTheme: ThemeData.dark(),
@@ -38,7 +69,8 @@ class MyApp extends StatelessWidget {
       home: const FileListPage(),
     );
   }
-}
+
+  }
 
 class FileListPage extends StatefulWidget {
   const FileListPage({super.key});
@@ -260,16 +292,98 @@ class _AppFilesPageState extends State<AppFilesPage> {
 class _FileListPageState extends State<FileListPage> {
   List<Map<String, dynamic>> _metaDataList = [];
   List<FileSystemEntity> files = [];
+  List<UnifiedFileItem> _unifiedFiles = [];
   bool loading = true;
   final Map<String, String> _durationCache = {};
   Map<FileSystemEntity, String> _fileTags = {};
   String _audioQuality = 'wav';
+  final ShareReceiverService _shareReceiverService = ShareReceiverService();
+  StreamSubscription? _shareSubscription;
+  late final UnifiedFileService _unifiedFileService;
 
   @override
   void initState() {
     super.initState();
+    _unifiedFileService = UnifiedFileService(LocalStorageServiceImpl());
     _loadFiles();
     _loadAudioQuality();
+    _initializeShareReceiver();
+  }
+
+  Future<void> _initializeShareReceiver() async {
+    try {
+      _shareReceiverService.initialize();
+      
+      // 监听分享内容流
+      _shareSubscription = _shareReceiverService.sharedContentStream.listen(
+        (sharedContent) {
+          _handleSharedContent(sharedContent);
+        },
+        onError: (error) {
+          debugPrint('Share receiver error: $error');
+        },
+      );
+      
+      // 检查初始分享内容（应用启动时的分享）
+      final initialContent = await _shareReceiverService.checkInitialSharedContent();
+      if (initialContent != null) {
+        _handleSharedContent(initialContent);
+      }
+    } catch (e) {
+      debugPrint('Failed to initialize share receiver: $e');
+    }
+  }
+
+  void _handleSharedContent(SharedContent sharedContent) async {
+    debugPrint('========== Main: 接收到分享内容 ==========');
+    debugPrint('Main: SharedContent ID: ${sharedContent.id}');
+    debugPrint('Main: SharedContent 文本: ${sharedContent.text}');
+    debugPrint('Main: SharedContent 图片数量: ${sharedContent.images?.length ?? 0}');
+    
+    try {
+      // 首先保存SharedContent到LocalStorageService
+      debugPrint('Main: 开始保存SharedContent到本地存储');
+      final localStorageService = LocalStorageServiceImpl();
+      await localStorageService.initialize();
+      await localStorageService.saveSharedContent(sharedContent);
+      debugPrint('Main: ✅ SharedContent保存成功');
+    } catch (e) {
+      debugPrint('Main: ❌ 保存SharedContent失败: $e');
+    }
+    
+    // 创建ShareContent对象用于导航
+    final shareContent = ShareContent(
+      id: sharedContent.id,
+      title: sharedContent.text?.isNotEmpty == true ? 
+        (sharedContent.text!.length > 50 ? sharedContent.text!.substring(0, 50) + '...' : sharedContent.text!) : 
+        '分享内容',
+      timestamp: DateTime.now(),
+      messageCount: 1,
+      imageCount: sharedContent.images?.length ?? 0,
+      sourceApp: 'unknown',
+      directoryPath: '/shared/${sharedContent.id}',
+      originalContent: sharedContent,
+    );
+    
+    debugPrint('Main: 创建的ShareContent标题: ${shareContent.title}');
+    debugPrint('Main: 准备导航到ShareDetailPage');
+    
+    // 导航到分享详情页
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ShareDetailPage(history: shareContent),
+      ),
+    );
+    
+    debugPrint('Main: ========== 导航完成 ==========');
+  }
+
+  @override
+  void dispose() {
+    _shareSubscription?.cancel();
+    _shareReceiverService.dispose();
+    super.dispose();
   }
 
   Future<void> _loadMetaData() async {
@@ -340,6 +454,10 @@ class _FileListPageState extends State<FileListPage> {
       loading = true;
     });
     try {
+      // 加载统一文件列表
+      _unifiedFiles = await _unifiedFileService.loadAllFiles();
+      
+      // 保持原有的录音文件加载逻辑
       List<FileSystemEntity> audioFiles = [];
       Directory dir = await getApplicationDocumentsDirectory();
       for (final item in _metaDataList) {
@@ -604,7 +722,7 @@ class _FileListPageState extends State<FileListPage> {
     } catch (e) {
       // ignore
     }
-    const duration = '未知时长';
+    const duration = '--';
     _durationCache[filePath] = duration;
     return duration;
   }
@@ -681,6 +799,10 @@ class _FileListPageState extends State<FileListPage> {
   }
 
   void _showFileMoreMenu(BuildContext context, Map<String, dynamic> meta) {
+    // 从meta中获取文件类型
+    final fileType = meta['type'] as String?;
+    final isAudioFile = fileType == 'audio';
+    
     showModalBottomSheet(
       context: context,
       backgroundColor: Theme.of(context).dialogBackgroundColor,
@@ -692,34 +814,59 @@ class _FileListPageState extends State<FileListPage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              _buildMenuItem(
-                context,
-                Icons.text_snippet,
-                'AI转文字',
-                pro: true,
-                onTap: () async {
-                  Navigator.pop(context);
-                  await _handleAiTranscribe(meta);
-                },
-              ),
-              _buildMenuItem(
-                context,
-                Icons.edit,
-                '重命名',
-                onTap: () {
-                  Navigator.pop(context);
-                  _renameFile(meta);
-                },
-              ),
-              _buildMenuItem(
-                context,
-                Icons.bookmark,
-                '编辑标签',
-                onTap: () {
-                  Navigator.pop(context);
-                  _editTagDialog(context, meta);
-                },
-              ),
+              // 录音文件专有功能
+              if (isAudioFile) ...[
+                _buildMenuItem(
+                  context,
+                  Icons.text_snippet,
+                  'AI转文字',
+                  pro: true,
+                  onTap: () async {
+                    Navigator.pop(context);
+                    await _handleAiTranscribe(meta);
+                  },
+                ),
+                _buildMenuItem(
+                  context,
+                  Icons.edit,
+                  '重命名',
+                  onTap: () {
+                    Navigator.pop(context);
+                    _renameFile(meta);
+                  },
+                ),
+                _buildMenuItem(
+                  context,
+                  Icons.bookmark,
+                  '编辑标签',
+                  onTap: () {
+                    Navigator.pop(context);
+                    _editTagDialog(context, meta);
+                  },
+                ),
+              ],
+              // 分享文件专有功能
+              if (!isAudioFile) ...[
+                _buildMenuItem(
+                  context,
+                  Icons.share,
+                  '重新分享',
+                  onTap: () {
+                    Navigator.pop(context);
+                    // TODO: 实现重新分享功能
+                  },
+                ),
+                _buildMenuItem(
+                  context,
+                  Icons.info_outline,
+                  '文件信息',
+                  onTap: () {
+                    Navigator.pop(context);
+                    // TODO: 显示文件详细信息
+                  },
+                ),
+              ],
+              // 通用功能
               _buildMenuItem(
                 context,
                 Icons.delete,
@@ -1165,13 +1312,6 @@ class _FileListPageState extends State<FileListPage> {
       appBar: AppBar(
         backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
         elevation: 0,
-        title: Text(
-          '录音文件',
-          style: TextStyle(
-            color: Theme.of(context).colorScheme.onBackground,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
         actions: [
           IconButton(
             icon: Icon(
@@ -1383,7 +1523,7 @@ class _FileListPageState extends State<FileListPage> {
           : RefreshIndicator(
               onRefresh: _loadFiles,
               color: Theme.of(context).colorScheme.primary,
-              child: files.isEmpty
+              child: _unifiedFiles.isEmpty
                   ? Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -1418,230 +1558,115 @@ class _FileListPageState extends State<FileListPage> {
                         horizontal: 16,
                         vertical: 8,
                       ),
-                      itemCount: _metaDataList.length,
+                      itemCount: _unifiedFiles.length,
                       itemBuilder: (context, index) {
-                        final meta = _metaDataList[index];
-                        final audioPath = meta['audioPath'] as String;
-                        final fileName = audioPath.split('/').last;
-                        final dotIdx = fileName.lastIndexOf('.');
-                        final displayName =
-                            meta['displayName'] ??
-                            (dotIdx > 0
-                                ? fileName.substring(0, dotIdx)
-                                : fileName);
-                        final ext = dotIdx > 0
-                            ? fileName.substring(dotIdx)
-                            : '';
-                        final filenameWithExt = displayName + ext;
-                        final tag = meta['tag'] ?? '--';
-                        final played = meta['played'] == true;
-                        final modifiedTime = meta['created'] != null
-                            ? DateTime.tryParse(meta['created']) ??
-                                  DateTime.now()
-                            : DateTime.now();
+                        final unifiedFile = _unifiedFiles[index];
+                        
+                        // 统一的显示属性
+                        final displayName = unifiedFile.title;
+                        final tag = unifiedFile.type == FileType.audio 
+                            ? (unifiedFile.metadata['tag'] ?? '--')
+                            : '分享';
+                        final played = unifiedFile.type == FileType.audio 
+                            ? (unifiedFile.metadata['played'] == true)
+                            : true;
+                        final modifiedTime = unifiedFile.createdAt;
+                          
                         return Padding(
                           padding: EdgeInsets.only(bottom: 12),
                           child: InkWell(
                             borderRadius: BorderRadius.circular(16),
                             onTap: () async {
-                              setState(() {
-                                meta['played'] = true;
-                              });
-                              await _saveMetaData();
-                              List<double> waveform = [];
-                              try {
-                                final dir =
-                                    await getApplicationDocumentsDirectory();
-                                final waveFile = File(
-                                  '${dir.path}/${meta['wavePath']}',
+                              if (unifiedFile.type == FileType.audio) {
+                                // 录音文件：更新播放状态并跳转到音频播放页面
+                                setState(() {
+                                  unifiedFile.metadata['played'] = true;
+                                });
+                                await _saveMetaData();
+                                
+                                List<double> waveform = [];
+                                try {
+                                  final dir = await getApplicationDocumentsDirectory();
+                                  final waveFile = File(
+                                    '${dir.path}/${unifiedFile.wavePath ?? ''}',
+                                  );
+                                  if (await waveFile.exists()) {
+                                    final content = await waveFile.readAsString();
+                                    waveform = List<double>.from(
+                                      jsonDecode(content),
+                                    );
+                                  }
+                                } catch (_) {}
+                                
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => AudioPlayerPage(
+                                      filePath: unifiedFile.absolutePath,
+                                      waveform: waveform,
+                                      displayName: displayName,
+                                    ),
+                                  ),
                                 );
-                                if (await waveFile.exists()) {
-                                  final content = await waveFile.readAsString();
-                                  waveform = List<double>.from(
-                                    jsonDecode(content),
+                              } else if (unifiedFile.type == FileType.share) {
+                                // 分享文件：跳转到分享详情页面
+                                final shareContent = ShareContent(
+                                  id: unifiedFile.id,
+                                  title: unifiedFile.title,
+                                  timestamp: unifiedFile.createdAt,
+                                  messageCount: 1,
+                                  imageCount: 0,
+                                  sourceApp: '未知应用',
+                                  directoryPath: unifiedFile.absolutePath,
+                                );
+                                
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => ShareDetailPage(history: shareContent),
+                                  ),
+                                );
+                              }
+                            },
+                            child: EnhancedCard(
+                              item: _convertToUnifiedHistory(unifiedFile, played, tag),
+                              animationDelay: index * 50, // 交错动画延迟
+                              onTap: () {
+                                // 保持原有的点击逻辑
+                                if (unifiedFile.type == FileType.audio) {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => AudioPlayerPage(
+                                        filePath: unifiedFile.absolutePath,
+                                        waveform: [],
+                                        displayName: displayName,
+                                      ),
+                                    ),
+                                  );
+                                } else if (unifiedFile.type == FileType.share) {
+                                  final shareContent = ShareContent(
+                                    id: unifiedFile.id,
+                                    title: unifiedFile.title,
+                                    timestamp: unifiedFile.createdAt,
+                                    messageCount: 1,
+                                    imageCount: 0,
+                                    sourceApp: '未知应用',
+                                    directoryPath: unifiedFile.absolutePath,
+                                  );
+                                  
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => ShareDetailPage(history: shareContent),
+                                    ),
                                   );
                                 }
-                              } catch (_) {}
-                              final dir =
-                                  await getApplicationDocumentsDirectory();
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => AudioPlayerPage(
-                                    filePath: '${dir.path}/$audioPath',
-                                    waveform: waveform,
-                                    displayName: displayName,
-                                  ),
-                                ),
-                              );
-                            },
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: Theme.of(context).colorScheme.surface,
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.outline.withOpacity(0.08),
-                                ),
-                              ),
-                              padding: EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 10,
-                              ),
-                              child: Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  // 左侧绿色渐变icon
-                                  Container(
-                                    width: 48,
-                                    height: 48,
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(12),
-                                      gradient: LinearGradient(
-                                        colors: [
-                                          Color(0xFFB7E7C2),
-                                          Color(0xFF7ED6A7),
-                                        ],
-                                        begin: Alignment.topLeft,
-                                        end: Alignment.bottomRight,
-                                      ),
-                                    ),
-                                    child: Icon(
-                                      Icons.graphic_eq,
-                                      color: Colors.white,
-                                      size: 28,
-                                    ),
-                                  ),
-                                  SizedBox(width: 12),
-                                  // 文件信息
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Row(
-                                          children: [
-                                            Expanded(
-                                              child: Row(
-                                                children: [
-                                                  Text(
-                                                    displayName,
-                                                    style: TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      fontSize: 17,
-                                                      color: Theme.of(context)
-                                                          .colorScheme
-                                                          .onBackground,
-                                                    ),
-                                                    maxLines: 1,
-                                                    overflow:
-                                                        TextOverflow.ellipsis,
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                            // 红点
-                                            if (!played)
-                                              Container(
-                                                width: 8,
-                                                height: 8,
-                                                margin: EdgeInsets.only(
-                                                  left: 6,
-                                                  right: 2,
-                                                ),
-                                                decoration: BoxDecoration(
-                                                  color: Colors.redAccent,
-                                                  shape: BoxShape.circle,
-                                                ),
-                                              ),
-                                          ],
-                                        ),
-                                        SizedBox(height: 4),
-                                        Row(
-                                          children: [
-                                            Text(
-                                              "${modifiedTime.year}/${modifiedTime.month.toString().padLeft(2, '0')}/${modifiedTime.day.toString().padLeft(2, '0')}  ${modifiedTime.hour.toString().padLeft(2, '0')}:${modifiedTime.minute.toString().padLeft(2, '0')}",
-                                              style: TextStyle(
-                                                color: Theme.of(
-                                                  context,
-                                                ).colorScheme.secondary,
-                                                fontSize: 13,
-                                              ),
-                                            ),
-                                            SizedBox(width: 8),
-                                            // 文件大小可选：如需显示需异步获取
-                                            Spacer(),
-                                            FutureBuilder<String>(
-                                              future: _getAudioDuration(
-                                                '${audioPath}',
-                                              ),
-                                              builder: (context, snapshot) {
-                                                final duration =
-                                                    snapshot.data ?? '00:00';
-                                                return Text(
-                                                  duration,
-                                                  style: TextStyle(
-                                                    color: Theme.of(
-                                                      context,
-                                                    ).colorScheme.secondary,
-                                                    fontSize: 13,
-                                                  ),
-                                                );
-                                              },
-                                            ),
-                                          ],
-                                        ),
-                                        SizedBox(height: 6),
-                                        // 标签
-                                        Row(
-                                          children: [
-                                            Container(
-                                              padding: EdgeInsets.symmetric(
-                                                horizontal: 8,
-                                                vertical: 2,
-                                              ),
-                                              decoration: BoxDecoration(
-                                                color: _tagBgColor(tag),
-                                                borderRadius:
-                                                    BorderRadius.circular(6),
-                                              ),
-                                              child: Text(
-                                                tag,
-                                                style: TextStyle(
-                                                  color: _tagColor(tag),
-                                                  fontSize: 13,
-                                                  fontWeight: FontWeight.w500,
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  // 右侧操作按钮
-                                  SizedBox(width: 8),
-                                  Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      IconButton(
-                                        icon: Icon(
-                                          Icons.more_vert,
-                                          color: Theme.of(
-                                            context,
-                                          ).colorScheme.secondary,
-                                          size: 22,
-                                        ),
-                                        onPressed: () =>
-                                            _showFileMoreMenu(context, meta),
-                                        tooltip: '更多',
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
+                              },
+                              onLongPress: () => _showFileMoreMenu(context, {
+                                ...unifiedFile.metadata,
+                                'type': unifiedFile.type == FileType.audio ? 'audio' : 'shared',
+                              }),
                             ),
                           ),
                         );
@@ -1664,6 +1689,27 @@ class _FileListPageState extends State<FileListPage> {
           child: Icon(Icons.mic, size: 28),
         ),
       ),
+    );
+  }
+
+  // 转换UnifiedFileItem为UnifiedHistory
+  UnifiedHistory _convertToUnifiedHistory(UnifiedFileItem file, bool played, String tag) {
+    return UnifiedHistory(
+      id: file.id,
+      title: file.title,
+      description: file.title,
+      contentType: file.type == FileType.audio ? ContentType.audio : ContentType.share,
+      filePath: file.absolutePath,
+      timestamp: file.createdAt,
+      metadata: {
+        ...file.metadata,
+        'isRead': played,
+        'tags': [tag],
+        'shareSource': file.type == FileType.share ? {
+          'appName': '分享应用',
+          'packageName': 'com.share.app',
+        } : null,
+      },
     );
   }
 }

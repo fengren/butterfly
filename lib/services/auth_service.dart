@@ -4,7 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../debug_console_page.dart';
 
 class AuthService {
-  static const _loginUrl = 'https://liangyi.29gpt.com/api/v1/auth/login/';
+  static const _loginUrl = 'https://liangyi.29gpt.com/api/v1/auth/login';
   static const _csrfToken = 'wbAUCCJlAEB7Vfc8s5wLVqRTDfkUAD2r';
 
   static Future<bool> login() async {
@@ -19,10 +19,7 @@ class AuthService {
       body: jsonEncode({'username': 'test', 'password': 'test_password'}),
     );
     DebugConsoleLog.log(
-      '[LOGIN] RESPONSE: ' +
-          response.statusCode.toString() +
-          '\n' +
-          response.body,
+      '[LOGIN] RESPONSE: ${response.statusCode}\n${response.body}',
     );
 
     if (response.statusCode == 200) {

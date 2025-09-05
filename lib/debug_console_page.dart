@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 class DebugConsolePage extends StatefulWidget {
+  const DebugConsolePage({super.key});
+
   @override
   _DebugConsolePageState createState() => _DebugConsolePageState();
 }
@@ -23,13 +25,13 @@ class _DebugConsolePageState extends State<DebugConsolePage> {
         },
       ),
       floatingActionButton: FloatingActionButton(
-        child: Icon(Icons.delete),
         tooltip: '清空日志',
         onPressed: () {
           setState(() {
             DebugConsoleLog.clear();
           });
         },
+        child: Icon(Icons.delete),
       ),
     );
   }

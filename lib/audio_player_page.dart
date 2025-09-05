@@ -46,7 +46,7 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
 
   // 字幕数据
   List<Map<String, dynamic>> _subtitles = [];
-  bool _showFullSubtitle = false;
+  final bool _showFullSubtitle = false;
   bool _showSubtitle = false;
   bool _showSummary = false;
   String? _summaryText;
@@ -811,8 +811,9 @@ class _AudioPlayerPageState extends State<AudioPlayerPage> {
     for (int i = 0; i < _subtitles.length; i++) {
       final s = _subtitles[i];
       final bool isLast = i == _subtitles.length - 1;
-      if (t >= s['start'] && (t < s['end'] || (isLast && t <= s['end'])))
+      if (t >= s['start'] && (t < s['end'] || (isLast && t <= s['end']))) {
         return i;
+      }
     }
     return null;
   }
@@ -1369,8 +1370,9 @@ class _SubtitleWithMarksWidgetState extends State<SubtitleWithMarksWidget> {
     for (int i = 0; i < widget.subtitles.length; i++) {
       final s = widget.subtitles[i];
       final bool isLast = i == widget.subtitles.length - 1;
-      if (t >= s['start'] && (t < s['end'] || (isLast && t <= s['end'])))
+      if (t >= s['start'] && (t < s['end'] || (isLast && t <= s['end']))) {
         return i;
+      }
     }
     return null;
   }
@@ -1453,7 +1455,7 @@ class _SubtitleWithMarksWidgetState extends State<SubtitleWithMarksWidget> {
               ),
             ),
             // 进度条
-            Container(
+            SizedBox(
               width: 28,
               height: constraints.maxHeight,
               child: Stack(

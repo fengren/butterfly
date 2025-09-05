@@ -7,13 +7,20 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:provider/provider.dart';
 
 import 'package:butterfly/main.dart';
+import 'package:butterfly/theme_notifier.dart';
 
 void main() {
   testWidgets('App should start without crashing', (WidgetTester tester) async {
     // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+    await tester.pumpWidget(
+      ChangeNotifierProvider(
+        create: (_) => ThemeNotifier(),
+        child: const MyApp(),
+      ),
+    );
 
     // Verify that the app starts without crashing
     expect(find.byType(MaterialApp), findsOneWidget);
