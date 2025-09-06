@@ -69,8 +69,7 @@ class _MyAppState extends State<MyApp> {
       home: const FileListPage(),
     );
   }
-
-  }
+}
 
 class FileListPage extends StatefulWidget {
   const FileListPage({super.key});
@@ -313,7 +312,7 @@ class _FileListPageState extends State<FileListPage> {
   Future<void> _initializeShareReceiver() async {
     try {
       _shareReceiverService.initialize();
-      
+
       // 监听分享内容流
       _shareSubscription = _shareReceiverService.sharedContentStream.listen(
         (sharedContent) {
@@ -323,9 +322,10 @@ class _FileListPageState extends State<FileListPage> {
           debugPrint('Share receiver error: $error');
         },
       );
-      
+
       // 检查初始分享内容（应用启动时的分享）
-      final initialContent = await _shareReceiverService.checkInitialSharedContent();
+      final initialContent = await _shareReceiverService
+          .checkInitialSharedContent();
       if (initialContent != null) {
         _handleSharedContent(initialContent);
       }
@@ -338,8 +338,10 @@ class _FileListPageState extends State<FileListPage> {
     debugPrint('========== Main: 接收到分享内容 ==========');
     debugPrint('Main: SharedContent ID: ${sharedContent.id}');
     debugPrint('Main: SharedContent 文本: ${sharedContent.text}');
-    debugPrint('Main: SharedContent 图片数量: ${sharedContent.images?.length ?? 0}');
-    
+    debugPrint(
+      'Main: SharedContent 图片数量: ${sharedContent.images?.length ?? 0}',
+    );
+
     try {
       // 首先保存SharedContent到LocalStorageService
       debugPrint('Main: 开始保存SharedContent到本地存储');
@@ -350,13 +352,15 @@ class _FileListPageState extends State<FileListPage> {
     } catch (e) {
       debugPrint('Main: ❌ 保存SharedContent失败: $e');
     }
-    
+
     // 创建ShareContent对象用于导航
     final shareContent = ShareContent(
       id: sharedContent.id,
-      title: sharedContent.text?.isNotEmpty == true ? 
-        (sharedContent.text!.length > 50 ? sharedContent.text!.substring(0, 50) + '...' : sharedContent.text!) : 
-        '分享内容',
+      title: sharedContent.text?.isNotEmpty == true
+          ? (sharedContent.text!.length > 50
+                ? sharedContent.text!.substring(0, 50) + '...'
+                : sharedContent.text!)
+          : '分享内容',
       timestamp: DateTime.now(),
       messageCount: 1,
       imageCount: sharedContent.images?.length ?? 0,
@@ -364,10 +368,10 @@ class _FileListPageState extends State<FileListPage> {
       directoryPath: '/shared/${sharedContent.id}',
       originalContent: sharedContent,
     );
-    
+
     debugPrint('Main: 创建的ShareContent标题: ${shareContent.title}');
     debugPrint('Main: 准备导航到ShareDetailPage');
-    
+
     // 导航到分享详情页
     Navigator.push(
       context,
@@ -375,7 +379,7 @@ class _FileListPageState extends State<FileListPage> {
         builder: (context) => ShareDetailPage(history: shareContent),
       ),
     );
-    
+
     debugPrint('Main: ========== 导航完成 ==========');
   }
 
@@ -456,7 +460,7 @@ class _FileListPageState extends State<FileListPage> {
     try {
       // 加载统一文件列表
       _unifiedFiles = await _unifiedFileService.loadAllFiles();
-      
+
       // 保持原有的录音文件加载逻辑
       List<FileSystemEntity> audioFiles = [];
       Directory dir = await getApplicationDocumentsDirectory();
@@ -727,82 +731,13 @@ class _FileListPageState extends State<FileListPage> {
     return duration;
   }
 
-  void _showThemeDialog(BuildContext context) {
-    final themeNotifier = Provider.of<ThemeNotifier>(context, listen: false);
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: Text(
-            '主题',
-            style: TextStyle(color: Theme.of(context).colorScheme.onBackground),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              RadioListTile<AppThemeMode>(
-                title: Text(
-                  '亮色模式',
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onBackground,
-                  ),
-                ),
-                value: AppThemeMode.light,
-                groupValue: themeNotifier.appThemeMode,
-                onChanged: (value) {
-                  themeNotifier.setTheme(value!);
-                  Navigator.pop(context);
-                },
-              ),
-              RadioListTile<AppThemeMode>(
-                title: Text(
-                  '暗色模式',
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onBackground,
-                  ),
-                ),
-                value: AppThemeMode.dark,
-                groupValue: themeNotifier.appThemeMode,
-                onChanged: (value) {
-                  themeNotifier.setTheme(value!);
-                  Navigator.pop(context);
-                },
-              ),
-              RadioListTile<AppThemeMode>(
-                title: Text(
-                  '追踪系统',
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onBackground,
-                  ),
-                ),
-                value: AppThemeMode.system,
-                groupValue: themeNotifier.appThemeMode,
-                onChanged: (value) {
-                  themeNotifier.setTheme(value!);
-                  Navigator.pop(context);
-                },
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text(
-                '选择',
-                style: TextStyle(color: Theme.of(context).colorScheme.primary),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
+  // 根据用户反馈：移除主题切换对话框方法
 
   void _showFileMoreMenu(BuildContext context, Map<String, dynamic> meta) {
     // 从meta中获取文件类型
     final fileType = meta['type'] as String?;
     final isAudioFile = fileType == 'audio';
-    
+
     showModalBottomSheet(
       context: context,
       backgroundColor: Theme.of(context).dialogBackgroundColor,
@@ -1313,14 +1248,7 @@ class _FileListPageState extends State<FileListPage> {
         backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
         elevation: 0,
         actions: [
-          IconButton(
-            icon: Icon(
-              Icons.color_lens,
-              color: Theme.of(context).iconTheme.color,
-            ),
-            onPressed: () => _showThemeDialog(context),
-            tooltip: '主题切换',
-          ),
+          // 根据用户反馈：移除主题切换按钮
           IconButton(
             icon: Icon(Icons.refresh, color: Theme.of(context).iconTheme.color),
             onPressed: _loadFiles,
@@ -1390,19 +1318,7 @@ class _FileListPageState extends State<FileListPage> {
                 MaterialPageRoute(builder: (_) => ProPage()),
               ),
             ),
-            ListTile(
-              leading: Icon(
-                Icons.checkroom,
-                color: Theme.of(context).iconTheme.color,
-              ),
-              title: Text(
-                '主题',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onBackground,
-                ),
-              ),
-              onTap: () => _showThemeDialog(context),
-            ),
+            // 根据用户反馈：移除主题选择菜单项
             ListTile(
               leading: Icon(
                 Icons.high_quality,
@@ -1554,26 +1470,23 @@ class _FileListPageState extends State<FileListPage> {
                       ),
                     )
                   : ListView.builder(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
-                      ),
+                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                       itemCount: _unifiedFiles.length,
                       itemBuilder: (context, index) {
                         final unifiedFile = _unifiedFiles[index];
-                        
+
                         // 统一的显示属性
                         final displayName = unifiedFile.title;
-                        final tag = unifiedFile.type == FileType.audio 
+                        final tag = unifiedFile.type == FileType.audio
                             ? (unifiedFile.metadata['tag'] ?? '--')
                             : '分享';
-                        final played = unifiedFile.type == FileType.audio 
+                        final played = unifiedFile.type == FileType.audio
                             ? (unifiedFile.metadata['played'] == true)
                             : true;
                         final modifiedTime = unifiedFile.createdAt;
-                          
+
                         return Padding(
-                          padding: EdgeInsets.only(bottom: 12),
+                          padding: EdgeInsets.only(bottom: 8),
                           child: InkWell(
                             borderRadius: BorderRadius.circular(16),
                             onTap: () async {
@@ -1583,21 +1496,23 @@ class _FileListPageState extends State<FileListPage> {
                                   unifiedFile.metadata['played'] = true;
                                 });
                                 await _saveMetaData();
-                                
+
                                 List<double> waveform = [];
                                 try {
-                                  final dir = await getApplicationDocumentsDirectory();
+                                  final dir =
+                                      await getApplicationDocumentsDirectory();
                                   final waveFile = File(
                                     '${dir.path}/${unifiedFile.wavePath ?? ''}',
                                   );
                                   if (await waveFile.exists()) {
-                                    final content = await waveFile.readAsString();
+                                    final content = await waveFile
+                                        .readAsString();
                                     waveform = List<double>.from(
                                       jsonDecode(content),
                                     );
                                   }
                                 } catch (_) {}
-                                
+
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
@@ -1619,17 +1534,22 @@ class _FileListPageState extends State<FileListPage> {
                                   sourceApp: '未知应用',
                                   directoryPath: unifiedFile.absolutePath,
                                 );
-                                
+
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (_) => ShareDetailPage(history: shareContent),
+                                    builder: (_) =>
+                                        ShareDetailPage(history: shareContent),
                                   ),
                                 );
                               }
                             },
                             child: EnhancedCard(
-                              item: _convertToUnifiedHistory(unifiedFile, played, tag),
+                              item: _convertToUnifiedHistory(
+                                unifiedFile,
+                                played,
+                                tag,
+                              ),
                               animationDelay: index * 50, // 交错动画延迟
                               onTap: () {
                                 // 保持原有的点击逻辑
@@ -1654,18 +1574,22 @@ class _FileListPageState extends State<FileListPage> {
                                     sourceApp: '未知应用',
                                     directoryPath: unifiedFile.absolutePath,
                                   );
-                                  
+
                                   Navigator.push(
                                     context,
                                     MaterialPageRoute(
-                                      builder: (_) => ShareDetailPage(history: shareContent),
+                                      builder: (_) => ShareDetailPage(
+                                        history: shareContent,
+                                      ),
                                     ),
                                   );
                                 }
                               },
                               onLongPress: () => _showFileMoreMenu(context, {
                                 ...unifiedFile.metadata,
-                                'type': unifiedFile.type == FileType.audio ? 'audio' : 'shared',
+                                'type': unifiedFile.type == FileType.audio
+                                    ? 'audio'
+                                    : 'shared',
                               }),
                             ),
                           ),
@@ -1693,22 +1617,27 @@ class _FileListPageState extends State<FileListPage> {
   }
 
   // 转换UnifiedFileItem为UnifiedHistory
-  UnifiedHistory _convertToUnifiedHistory(UnifiedFileItem file, bool played, String tag) {
+  UnifiedHistory _convertToUnifiedHistory(
+    UnifiedFileItem file,
+    bool played,
+    String tag,
+  ) {
     return UnifiedHistory(
       id: file.id,
       title: file.title,
       description: file.title,
-      contentType: file.type == FileType.audio ? ContentType.audio : ContentType.share,
+      contentType: file.type == FileType.audio
+          ? ContentType.audio
+          : ContentType.share,
       filePath: file.absolutePath,
       timestamp: file.createdAt,
       metadata: {
         ...file.metadata,
         'isRead': played,
         'tags': [tag],
-        'shareSource': file.type == FileType.share ? {
-          'appName': '分享应用',
-          'packageName': 'com.share.app',
-        } : null,
+        'shareSource': file.type == FileType.share
+            ? {'appName': '分享应用', 'packageName': 'com.share.app'}
+            : null,
       },
     );
   }

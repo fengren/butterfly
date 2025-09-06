@@ -5,10 +5,10 @@ class CardTheme {
   // 卡片基础样式
   static const double cardRadius = 20.0;
   static const double cardElevation = 0.0; // 使用自定义阴影
-  // 根据用户反馈：减少卡片间距，增加宽度
+  // 根据用户反馈：进一步减少卡片间距，增加宽度
   static const EdgeInsets cardMargin = EdgeInsets.symmetric(
-    horizontal: 12,
-    vertical: 6,
+    horizontal: 8,
+    vertical: 4,
   );
   // 根据用户反馈：略微增加卡片高度
   static const EdgeInsets cardPadding = EdgeInsets.symmetric(

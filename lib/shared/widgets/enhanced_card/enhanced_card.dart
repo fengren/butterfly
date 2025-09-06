@@ -9,7 +9,8 @@ import 'card_animations.dart';
 extension UnifiedHistoryExtension on UnifiedHistory {
   String get type => contentType.toString().split('.').last;
   bool get isRead => metadata['isRead'] ?? false;
-  List<String> get tags => (metadata['tags'] as List<dynamic>?)?.cast<String>() ?? [];
+  List<String> get tags =>
+      (metadata['tags'] as List<dynamic>?)?.cast<String>() ?? [];
   String get content => description ?? '';
   ShareSource? get shareSource {
     final sourceData = metadata['shareSource'] as Map<String, dynamic>?;
@@ -27,11 +28,8 @@ extension UnifiedHistoryExtension on UnifiedHistory {
 class ShareSource {
   final String appName;
   final String packageName;
-  
-  const ShareSource({
-    required this.appName,
-    required this.packageName,
-  });
+
+  const ShareSource({required this.appName, required this.packageName});
 }
 
 /// 增强版卡片组件
@@ -42,7 +40,7 @@ class EnhancedCard extends StatefulWidget {
   final bool showAnimation;
   final int animationDelay;
   final bool enableHover;
-  
+
   const EnhancedCard({
     Key? key,
     required this.item,
@@ -52,7 +50,7 @@ class EnhancedCard extends StatefulWidget {
     this.animationDelay = 0,
     this.enableHover = true,
   }) : super(key: key);
-  
+
   @override
   State<EnhancedCard> createState() => _EnhancedCardState();
 }
@@ -63,37 +61,33 @@ class _EnhancedCardState extends State<EnhancedCard>
   bool _isTapped = false;
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
-  
+
   @override
   void initState() {
     super.initState();
-    
+
     // 脉冲动画控制器
     _pulseController = AnimationController(
-      duration: const Duration(milliseconds: 1500),
+      duration: const Duration(milliseconds: 500),
       vsync: this,
     );
-    
-    _pulseAnimation = Tween<double>(
-      begin: 1.0,
-      end: 1.1,
-    ).animate(CurvedAnimation(
-      parent: _pulseController,
-      curve: Curves.easeInOut,
-    ));
-    
+
+    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.1).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+
     // 如果有未读消息，启动脉冲动画
     if (!widget.item.isRead) {
       _pulseController.repeat(reverse: true);
     }
   }
-  
+
   @override
   void dispose() {
     _pulseController.dispose();
     super.dispose();
   }
-  
+
   @override
   Widget build(BuildContext context) {
     return CardEnterAnimation(
@@ -120,15 +114,21 @@ class _EnhancedCardState extends State<EnhancedCard>
                 child: Container(
                   decoration: BoxDecoration(
                     color: Theme.of(context).cardColor,
-                    borderRadius: BorderRadius.circular(custom_theme.CardTheme.cardRadius),
+                    borderRadius: BorderRadius.circular(
+                      custom_theme.CardTheme.cardRadius,
+                    ),
                     boxShadow: _getShadow(),
                   ),
                   child: Material(
                     color: Colors.transparent,
-                    borderRadius: BorderRadius.circular(custom_theme.CardTheme.cardRadius),
+                    borderRadius: BorderRadius.circular(
+                      custom_theme.CardTheme.cardRadius,
+                    ),
                     child: InkWell(
                       onTap: null, // 由外层GestureDetector处理
-                      borderRadius: BorderRadius.circular(custom_theme.CardTheme.cardRadius),
+                      borderRadius: BorderRadius.circular(
+                        custom_theme.CardTheme.cardRadius,
+                      ),
                       splashColor: _getRippleColor().withOpacity(0.1),
                       highlightColor: _getRippleColor().withOpacity(0.05),
                       child: Padding(
@@ -145,85 +145,87 @@ class _EnhancedCardState extends State<EnhancedCard>
       ),
     );
   }
-  
+
   void _handleHoverEnter() {
     if (!widget.enableHover) return;
     setState(() {
       _isHovered = true;
     });
   }
-  
+
   void _handleHoverExit() {
     if (!widget.enableHover) return;
     setState(() {
       _isHovered = false;
     });
   }
-  
+
   void _handleTap() {
     HapticFeedback.lightImpact();
     widget.onTap?.call();
   }
-  
+
   void _handleLongPress() {
     HapticFeedback.mediumImpact();
     widget.onLongPress?.call();
   }
-  
+
   void _handleTapDown() {
     setState(() {
       _isTapped = true;
     });
   }
-  
+
   void _handleTapUp() {
     setState(() {
       _isTapped = false;
     });
   }
-  
+
   void _handleTapCancel() {
     setState(() {
       _isTapped = false;
     });
   }
-  
+
   double _getScale() {
     // 根据用户反馈：减少动画效果幅度
     if (_isTapped) return 0.99;
     if (_isHovered) return 1.01;
     return 1.0;
   }
-  
+
   List<BoxShadow> _getShadow() {
     if (_isHovered) {
       return custom_theme.CardTheme.cardHoverShadow;
     }
     return custom_theme.CardTheme.cardShadow;
   }
-  
+
   Color _getRippleColor() {
-    final gradientColors = custom_theme.CardColors.getGradientByType(widget.item.type);
+    final gradientColors = custom_theme.CardColors.getGradientByType(
+      widget.item.type,
+    );
     return gradientColors.first;
   }
-  
+
   Widget _buildCardContent() {
     return Row(
       children: [
         _buildLeadingIcon(),
         const SizedBox(width: 16),
-        Expanded(
-          child: _buildContentColumn(),
-        ),
+        Expanded(child: _buildContentColumn()),
         _buildTrailingActions(),
       ],
     );
   }
-  
+
   Widget _buildLeadingIcon() {
-    final gradientColors = custom_theme.CardColors.getGradientByType(widget.item.type);
+    final gradientColors = custom_theme.CardColors.getGradientByType(
+      widget.item.type,
+    );
     final iconData = _getIconData();
-    
+
     return Container(
       width: custom_theme.CardTheme.iconSize,
       height: custom_theme.CardTheme.iconSize,
@@ -246,15 +248,11 @@ class _EnhancedCardState extends State<EnhancedCard>
         turns: _isHovered ? 0.05 : 0.0,
         duration: custom_theme.CardAnimations.hoverDuration,
         curve: custom_theme.CardAnimations.hoverCurve,
-        child: Icon(
-          iconData,
-          color: Colors.white,
-          size: 28,
-        ),
+        child: Icon(iconData, color: Colors.white, size: 28),
       ),
     );
   }
-  
+
   IconData _getIconData() {
     switch (widget.item.type.toLowerCase()) {
       case 'audio':
@@ -276,7 +274,7 @@ class _EnhancedCardState extends State<EnhancedCard>
         return Icons.insert_drive_file_rounded;
     }
   }
-  
+
   Widget _buildContentColumn() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -286,12 +284,12 @@ class _EnhancedCardState extends State<EnhancedCard>
         // 根据用户反馈：分享卡片也显示summary，保持高度一致
         const SizedBox(height: 4),
         _buildSubtitle(),
-        const SizedBox(height: 8),
+        const SizedBox(height: 4),
         _buildMetaInfo(),
       ],
     );
   }
-  
+
   Widget _buildTitleRow() {
     return Row(
       children: [
@@ -322,7 +320,8 @@ class _EnhancedCardState extends State<EnhancedCard>
                     shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
-                        color: custom_theme.CardColors.unreadIndicator.withOpacity(0.4),
+                        color: custom_theme.CardColors.unreadIndicator
+                            .withOpacity(0.4),
                         blurRadius: 4.0 + 2.0 * (_pulseAnimation.value - 1.0),
                         spreadRadius: 1.0 + 0.5 * (_pulseAnimation.value - 1.0),
                       ),
@@ -336,51 +335,53 @@ class _EnhancedCardState extends State<EnhancedCard>
       ],
     );
   }
-  
+
   Widget _buildSubtitle() {
     // 根据用户反馈：录音显示时长，分享显示summary
     if (widget.item.contentType == ContentType.audio) {
       return Text(
-        '录音 • ${_formatDuration()}',
+        _formatDuration(),
         style: custom_theme.CardTheme.subtitleStyle.copyWith(
-          color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.7),
+          color: Theme.of(
+            context,
+          ).textTheme.bodyMedium?.color?.withOpacity(0.7),
         ),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       );
     } else {
       // 分享卡片显示description内容
-       final summary = widget.item.description?.isNotEmpty == true 
-           ? widget.item.description! 
-           : widget.item.title;
-      
+      final summary = widget.item.description?.isNotEmpty == true
+          ? widget.item.description!
+          : widget.item.title;
+
       return Text(
         summary,
         style: custom_theme.CardTheme.subtitleStyle.copyWith(
-          color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.7),
+          color: Theme.of(
+            context,
+          ).textTheme.bodyMedium?.color?.withOpacity(0.7),
         ),
-        maxLines: 2,
+        maxLines: 1,
         overflow: TextOverflow.ellipsis,
       );
     }
   }
-  
+
   Widget _buildMetaInfo() {
     return Wrap(
       spacing: 8,
       runSpacing: 4,
-      children: [
-        _buildTimeChip(),
-        if (widget.item.tags.isNotEmpty) ...
-          widget.item.tags.take(2).map(_buildTagChip),
-        // 根据用户反馈：移除分享应用来源显示
-      ],
+      children: [_buildTimeChip(), _buildTypeChip()],
     );
   }
-  
+
   Widget _buildTimeChip() {
-    final timeText = _formatTime(widget.item.timestamp);
-    
+    String timeText;
+
+    // 根据用户反馈：录音显示时长+绝对时间，分享显示绝对时间
+
+    timeText = _formatAbsoluteTime(widget.item.timestamp);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
@@ -395,19 +396,49 @@ class _EnhancedCardState extends State<EnhancedCard>
       ),
     );
   }
-  
+
+  Widget _buildTypeChip() {
+    String typeText;
+    Color typeColor;
+
+    // 根据用户反馈：显示内容类型
+    if (widget.item.contentType.name == 'audio') {
+      typeText = '录音';
+      typeColor = custom_theme.CardColors.audioGradient.first;
+    } else if (widget.item.shareSource != null) {
+      typeText = '分享';
+      typeColor = custom_theme.CardColors.shareGradient.first;
+    } else {
+      typeText = '文本';
+      typeColor = custom_theme.CardColors.textGradient.first;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: typeColor.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: typeColor.withOpacity(0.3), width: 1),
+      ),
+      child: Text(
+        typeText,
+        style: custom_theme.CardTheme.metaStyle.copyWith(
+          color: typeColor,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+    );
+  }
+
   Widget _buildTagChip(String tag) {
     final tagColor = custom_theme.CardColors.getTagColor(tag);
-    
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: tagColor.withOpacity(0.1),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: tagColor.withOpacity(0.3),
-          width: 1,
-        ),
+        border: Border.all(color: tagColor.withOpacity(0.3), width: 1),
       ),
       child: Text(
         tag,
@@ -418,10 +449,10 @@ class _EnhancedCardState extends State<EnhancedCard>
       ),
     );
   }
-  
+
   Widget _buildSourceChip() {
     final source = widget.item.shareSource!;
-    
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
@@ -452,22 +483,22 @@ class _EnhancedCardState extends State<EnhancedCard>
       ),
     );
   }
-  
+
   String _formatDuration() {
     final duration = widget.item.metadata['duration'] as int? ?? 0;
     final minutes = duration ~/ 60;
     final seconds = duration % 60;
     return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
   }
-  
+
   Widget _buildTrailingActions() {
     // 根据用户反馈：移除三个点菜单，保留长按操作
     return const SizedBox.shrink();
   }
-  
+
   void _showMoreOptions(BuildContext context) {
     HapticFeedback.lightImpact();
-    
+
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -520,11 +551,11 @@ class _EnhancedCardState extends State<EnhancedCard>
       ),
     );
   }
-  
+
   String _formatTime(DateTime timestamp) {
     final now = DateTime.now();
     final difference = now.difference(timestamp);
-    
+
     if (difference.inDays > 0) {
       return '${difference.inDays}天前';
     } else if (difference.inHours > 0) {
@@ -533,6 +564,27 @@ class _EnhancedCardState extends State<EnhancedCard>
       return '${difference.inMinutes}分钟前';
     } else {
       return '刚刚';
+    }
+  }
+
+  String _formatAbsoluteTime(DateTime timestamp) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final timestampDate = DateTime(
+      timestamp.year,
+      timestamp.month,
+      timestamp.day,
+    );
+
+    if (timestampDate == today) {
+      // 今天显示时间
+      return '${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')}';
+    } else if (timestampDate == today.subtract(const Duration(days: 1))) {
+      // 昨天
+      return '昨天 ${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')}';
+    } else {
+      // 其他日期
+      return '${timestamp.month}/${timestamp.day} ${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')}';
     }
   }
 }
